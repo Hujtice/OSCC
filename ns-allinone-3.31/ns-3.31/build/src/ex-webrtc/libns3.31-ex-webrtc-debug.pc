@@ -1,0 +1,10 @@
+prefix=/usr/local
+libdir=/usr/local/lib
+includedir=/usr/local/include/ns3.31
+
+Name: libns3-ex-webrtc
+Description: ns-3 module ns3-ex-webrtc
+Version: 3.31
+Libs: -L${libdir} -Wl,-Bdynamic -lns3.31-ex-webrtc-debug -L/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/src/ex-webrtc/webrtc/src/out/m84/obj -lwebrtc
+Cflags: -I${includedir} -I/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/src/ex-webrtc/webrtc/src -I/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/src/ex-webrtc/webrtc/src/third_party/abseil-cpp
+Requires: 
