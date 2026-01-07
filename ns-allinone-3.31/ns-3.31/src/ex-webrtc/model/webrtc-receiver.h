@@ -8,9 +8,12 @@
 #include "ns3/internet-module.h"
 #include "ns3/webrtc-config.h"
 #include "ns3/atomic-lock.h"
+#include "frame-playout-manager.h"
 #include "test/scenario/transport_base.h"
 #include "call/call.h"
+
 namespace ns3{
+
 class WebrtcReceiver:public webrtc::test::TransportBase,public Application{
 public:
     WebrtcReceiver(WebrtcSessionManager *manager);
@@ -26,7 +29,16 @@ public:
     bool SendRtp(const uint8_t* packet,
                 size_t length,
                 const webrtc::PacketOptions& options) override;
-    bool SendRtcp(const uint8_t* packet, size_t length) override; 
+    bool SendRtcp(const uint8_t* packet, size_t length) override;
+    
+    // 帧播放管理器接口
+    void SetFramePlayoutManager(FramePlayoutManager* manager) {
+        m_framePlayoutManager = manager;
+    }
+    FramePlayoutManager* GetFramePlayoutManager() const {
+        return m_framePlayoutManager;
+    }
+
 private:
     virtual void StartApplication() override;
     virtual void StopApplication() override;
@@ -34,6 +46,7 @@ private:
     void DeliveryPacket();
     void SendToNetwork(Ptr<Packet> p);
     void RecvPacket(Ptr<Socket> socket);
+    
     bool m_running{false};
     WebrtcSessionManager *m_manager{nullptr};
     webrtc::Clock *m_clock;
@@ -53,5 +66,8 @@ private:
     uint32_t m_context=0;
     TraceReceiptPacketInfo m_traceReceiptPkt;
     uint32_t m_packetOverhead{0};
+    
+    // 帧播放管理器
+    FramePlayoutManager* m_framePlayoutManager{nullptr};
 };    
 }

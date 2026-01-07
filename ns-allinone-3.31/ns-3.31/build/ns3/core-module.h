@@ -32,6 +32,7 @@
 #include "event-garbage-collector.h"
 #include "event-id.h"
 #include "event-impl.h"
+#include "example-as-test.h"
 #include "fatal-error.h"
 #include "fatal-impl.h"
 #include "global-value.h"

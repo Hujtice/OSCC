@@ -8,6 +8,7 @@
 
 // Module headers:
 #include "atomic-lock.h"
+#include "frame-playout-manager.h"
 #include "webrtc-clock.h"
 #include "webrtc-config.h"
 #include "webrtc-defines.h"

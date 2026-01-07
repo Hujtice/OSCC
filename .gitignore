@@ -1,0 +1,5 @@
+ns-allinone-3.31/ns-3.31/build
+ns-allinone-3.31/ns-3.31/.*esults
+webrtc-header-lib/*
+ns-allinone-3.31/ns-3.31/.waf*
+ns-allinone-3.31/ns-3.31/__pycache__

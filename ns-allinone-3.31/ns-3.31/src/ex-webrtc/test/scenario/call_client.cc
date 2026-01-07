@@ -62,6 +62,8 @@ Call* CreateCall(TimeController* time_controller,
       config.transport.rates.min_rate.bps();
   call_config.bitrate_config.start_bitrate_bps =
       config.transport.rates.start_rate.bps();
+
+      
   call_config.task_queue_factory = time_controller->GetTaskQueueFactory();
   call_config.network_controller_factory = network_controller_factory;
   call_config.audio_state = audio_state;

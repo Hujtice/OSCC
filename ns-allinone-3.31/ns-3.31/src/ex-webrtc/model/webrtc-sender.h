@@ -1,66 +1,5 @@
 // #pragma once 
-// #include <deque>
-// #include "ns3/event-id.h"
-// #include "ns3/callback.h"
-// #include "ns3/application.h"
-// #include "ns3/socket.h"
-// #include "ns3/network-module.h"
-// #include "ns3/internet-module.h"
-// #include "ns3/webrtc-config.h"
-// #include "ns3/atomic-lock.h"
-// #include "test/scenario/transport_base.h"
-// #include "call/call.h"
-// namespace ns3{
-// //DataSize::Bytes(PacketOverhead::kDefault)
-// class WebrtcSender:public webrtc::test::TransportBase,public Application{
-// public:
-//     WebrtcSender(WebrtcSessionManager *manager);
-//     ~WebrtcSender() override;
-//     InetSocketAddress GetLocalAddress();
-//     void Bind(uint16_t port);
-//     void ConfigurePeer(Ipv4Address addr,uint16_t port);
-//     typedef Callback<void,uint32_t,uint32_t> TraceBandwidth;
-//     void SetBwTraceFuc(TraceBandwidth cb);
-//     //can not use here
-//     void Construct(webrtc::Clock* sender_clock, webrtc::Call* sender_call) override{}
-//   bool SendRtp(const uint8_t* packet,
-//                size_t length,
-//                const webrtc::PacketOptions& options) override;
-//   bool SendRtcp(const uint8_t* packet, size_t length) override;
 
-//   webrtc::Call* m_call{nullptr};
-
-// private:
-// 	virtual void StartApplication() override;
-// 	virtual void StopApplication() override;
-//     void NotifyRouteChange();
-//     void DeliveryPacket();
-//     void SendToNetwork(Ptr<Packet> p);
-//     void RecvPacket(Ptr<Socket> socket);
-//     bool m_running{false};
-//     WebrtcSessionManager *m_manager{nullptr};
-//     webrtc::Clock *m_clock;
-//     uint16_t m_bindPort;
-//     Ptr<Socket> m_socket;
-//     Ipv4Address m_peerIp;
-//     uint16_t m_peerPort;
-//     webrtc::test::CallClient *m_client{nullptr};
-//     uint64_t m_seq{1};
-//     AtomicLock m_rtpLock;
-//     std::deque<rtc::CopyOnWriteBuffer> m_rtpQ;
-//     AtomicLock m_rtcpLock;
-//     std::deque<rtc::CopyOnWriteBuffer> m_rtcpQ;
-//     int64_t m_lastTraceTime{0};
-//     uint32_t m_context=0;
-//     TraceBandwidth m_traceBw;
-//     uint32_t m_packetOverhead{0};
-//     uint32_t m_initial_time{0};
-// };   
-// }
-
-
-
-// #pragma once 
 // #include <deque>
 // #include <random>
 // #include "ns3/event-id.h"
@@ -80,7 +19,7 @@
 // typedef Callback<void, uint32_t, uint32_t, uint32_t, double> TraceScaledBandwidth;
 
 // // 前向声明 RLSM 类
-// class RLSM;
+// // class RLSM;
 
 // class WebrtcSender:public webrtc::test::TransportBase,public Application{
 // public:
@@ -91,103 +30,7 @@
 //     void ConfigurePeer(Ipv4Address addr,uint16_t port);
 //     typedef Callback<void,uint32_t,uint32_t> TraceBandwidth;
 //     void SetBwTraceFuc(TraceBandwidth cb);
-    
-//     // 新增：设置带宽缩放系数和回调
-//     void SetBandwidthScaleFactor(double factor);
-//     double GetBandwidthScaleFactor() const;
-//     uint32_t GetScaledBandwidth(uint32_t original_bw);
-//     void SetScaledBwTraceFuc(TraceScaledBandwidth cb);  // 新增缩放带宽回调
-    
-//     // 新增：RL状态管理器相关方法
-//     void SetRLSM(RLSM* rl_manager);
-//     void UpdateBandwidthScaleFactor(double new_factor);
-//     double GetCurrentBandwidthScaleFactor() const;
-    
-//     //can not use here
-//     void Construct(webrtc::Clock* sender_clock, webrtc::Call* sender_call) override{}
-//   bool SendRtp(const uint8_t* packet,
-//                size_t length,
-//                const webrtc::PacketOptions& options) override;
-//   bool SendRtcp(const uint8_t* packet, size_t length) override;
-// private:
-// 	virtual void StartApplication() override;
-// 	virtual void StopApplication() override;
-//     void NotifyRouteChange();
-//     void DeliveryPacket();
-//     void SendToNetwork(Ptr<Packet> p);
-//     void RecvPacket(Ptr<Socket> socket);
-    
-//     // 新增：带宽限制检查方法
-//     bool ShouldSendPacket(size_t packet_size);
-//     bool ShouldSendPacketByProbability();
-
-//     bool m_running{false};
-//     WebrtcSessionManager *m_manager{nullptr};
-//     webrtc::Clock *m_clock;
-//     uint16_t m_bindPort;
-//     Ptr<Socket> m_socket;
-//     Ipv4Address m_peerIp;
-//     uint16_t m_peerPort;
-//     webrtc::test::CallClient *m_client{nullptr};
-//     webrtc::Call* m_call{nullptr};
-//     uint64_t m_seq{1};
-//     AtomicLock m_rtpLock;
-//     std::deque<rtc::CopyOnWriteBuffer> m_rtpQ;
-//     AtomicLock m_rtcpLock;
-//     std::deque<rtc::CopyOnWriteBuffer> m_rtcpQ;
-//     int64_t m_lastTraceTime{0};
-//     uint32_t m_context=0;
-//     TraceBandwidth m_traceBw;
-//     TraceScaledBandwidth m_traceScaledBw;  // 新增缩放带宽回调
-//     uint32_t m_packetOverhead{0};
-//     uint32_t m_initial_time{0};
-    
-//     // 新增：带宽缩放相关成员变量
-//     double m_bandwidth_scale_factor{1.0};  // 带宽缩放系数 μ
-//     uint32_t m_last_original_bandwidth{0}; // 上次原始带宽
-//     uint32_t m_last_scaled_bandwidth{0};   // 上次缩放后带宽
-//     uint32_t m_current_scaled_bandwidth{0}; // 当前使用的缩放带宽
-//     uint64_t m_accumulated_bytes{0};       // 当前时间窗口内已发送的字节数
-//     uint64_t m_last_bandwidth_check_time{0}; // 上次带宽检查时间
-    
-//     // 新增：RL状态管理器
-//     RLSM* m_rlManager{nullptr};
-//     double m_last_reported_mu{-1.0};       // 记录上次报告的μ值
-// };   
-// }
-
-
-// #pragma once 
-// #include <deque>
-// #include <random>
-// #include "ns3/event-id.h"
-// #include "ns3/callback.h"
-// #include "ns3/application.h"
-// #include "ns3/socket.h"
-// #include "ns3/network-module.h"
-// #include "ns3/internet-module.h"
-// #include "ns3/webrtc-config.h"
-// #include "ns3/atomic-lock.h"
-// #include "test/scenario/transport_base.h"
-// #include "call/call.h"
-
-// namespace ns3{
-
-// // 新增：带宽缩放回调类型
-// typedef Callback<void, uint32_t, uint32_t, uint32_t, double> TraceScaledBandwidth;
-
-// // 前向声明 RLSM 类
-// class RLSM;
-
-// class WebrtcSender:public webrtc::test::TransportBase,public Application{
-// public:
-//     WebrtcSender(WebrtcSessionManager *manager);
-//     ~WebrtcSender() override;
-//     InetSocketAddress GetLocalAddress();
-//     void Bind(uint16_t port);
-//     void ConfigurePeer(Ipv4Address addr,uint16_t port);
-//     typedef Callback<void,uint32_t,uint32_t> TraceBandwidth;
-//     void SetBwTraceFuc(TraceBandwidth cb);
+//     void EnableAdaptiveMu(bool enable) { m_adaptive_mu = enable; }
     
 //     // 新增：设置带宽缩放系数和回调
 //     void SetBandwidthScaleFactor(double factor);
@@ -196,113 +39,7 @@
 //     void SetScaledBwTraceFuc(TraceScaledBandwidth cb);
     
 //     // 新增：RL状态管理器相关方法
-//     void SetRLSM(RLSM* rl_manager);
-//     void UpdateBandwidthScaleFactor(double new_factor);
-//     double GetCurrentBandwidthScaleFactor() const;
-    
-//     //can not use here
-//     void Construct(webrtc::Clock* sender_clock, webrtc::Call* sender_call) override{}
-//   bool SendRtp(const uint8_t* packet,
-//                size_t length,
-//                const webrtc::PacketOptions& options) override;
-//   bool SendRtcp(const uint8_t* packet, size_t length) override;
-// private:
-// 	virtual void StartApplication() override;
-// 	virtual void StopApplication() override;
-//     void NotifyRouteChange();
-//     void DeliveryPacket();
-//     void SendToNetwork(Ptr<Packet> p);
-//     void RecvPacket(Ptr<Socket> socket);
-    
-//     // 新增：带宽限制检查方法
-//     bool ShouldSendPacket(size_t packet_size);
-//     void UpdateBandwidthLimiter();
-//     void ResetBandwidthLimiter();
-
-//     bool m_running{false};
-//     WebrtcSessionManager *m_manager{nullptr};
-//     webrtc::Clock *m_clock;
-//     uint16_t m_bindPort;
-//     Ptr<Socket> m_socket;
-//     Ipv4Address m_peerIp;
-//     uint16_t m_peerPort;
-//     webrtc::test::CallClient *m_client{nullptr};
-//     webrtc::Call* m_call{nullptr};
-//     uint64_t m_seq{1};
-//     AtomicLock m_rtpLock;
-//     std::deque<rtc::CopyOnWriteBuffer> m_rtpQ;
-//     AtomicLock m_rtcpLock;
-//     std::deque<rtc::CopyOnWriteBuffer> m_rtcpQ;
-//     int64_t m_lastTraceTime{0};
-//     uint32_t m_context=0;
-//     TraceBandwidth m_traceBw;
-//     TraceScaledBandwidth m_traceScaledBw;
-//     uint32_t m_packetOverhead{0};
-//     uint32_t m_initial_time{0};
-    
-//     // 修改：带宽缩放相关成员变量 - 重新设计
-//     double m_bandwidth_scale_factor{1.0};  // 带宽缩放系数 μ
-//     uint32_t m_current_estimated_bandwidth{0}; // 当前GCC估计的带宽
-//     uint32_t m_current_scaled_bandwidth{0};    // 当前应用的缩放带宽
-    
-//     // 新增：带宽限制器状态
-//     uint64_t m_accumulated_bytes{0};           // 当前时间窗口内已发送的字节数
-//     uint64_t m_last_bandwidth_check_time{0};   // 上次带宽检查时间
-//     uint64_t m_dropped_packets{0};             // 统计丢弃的包数量
-//     uint64_t m_total_packets{0};               // 统计总包数量
-    
-//     // 新增：RL状态管理器
-//     RLSM* m_rlManager{nullptr};
-//     double m_last_reported_mu{-1.0};
-    
-//     // 新增：带宽限制器配置
-//     static const uint32_t BANDWIDTH_CHECK_INTERVAL_MS = 100; // 带宽检查间隔
-//     static const double BANDWIDTH_TOLERANCE; // 带宽容忍度
-// };   
-// }
-
-
-
-// #pragma once 
-// #include <deque>
-// #include <random>
-// #include "ns3/event-id.h"
-// #include "ns3/callback.h"
-// #include "ns3/application.h"
-// #include "ns3/socket.h"
-// #include "ns3/network-module.h"
-// #include "ns3/internet-module.h"
-// #include "ns3/webrtc-config.h"
-// #include "ns3/atomic-lock.h"
-// #include "test/scenario/transport_base.h"
-// #include "call/call.h"
-
-// namespace ns3{
-
-// // 新增：带宽缩放回调类型
-// typedef Callback<void, uint32_t, uint32_t, uint32_t, double> TraceScaledBandwidth;
-
-// // 前向声明 RLSM 类
-// class RLSM;
-
-// class WebrtcSender:public webrtc::test::TransportBase,public Application{
-// public:
-//     WebrtcSender(WebrtcSessionManager *manager);
-//     ~WebrtcSender() override;
-//     InetSocketAddress GetLocalAddress();
-//     void Bind(uint16_t port);
-//     void ConfigurePeer(Ipv4Address addr,uint16_t port);
-//     typedef Callback<void,uint32_t,uint32_t> TraceBandwidth;
-//     void SetBwTraceFuc(TraceBandwidth cb);
-    
-//     // 新增：设置带宽缩放系数和回调
-//     void SetBandwidthScaleFactor(double factor);
-//     double GetBandwidthScaleFactor() const;
-//     uint32_t GetScaledBandwidth(uint32_t original_bw);
-//     void SetScaledBwTraceFuc(TraceScaledBandwidth cb);
-    
-//     // 新增：RL状态管理器相关方法
-//     void SetRLSM(RLSM* rl_manager);
+//     // void SetRLSM(RLSM* rl_manager);
 //     void UpdateBandwidthScaleFactor(double new_factor);
 //     double GetCurrentBandwidthScaleFactor() const;
     
@@ -311,7 +48,7 @@
 //     void VerifyBandwidthScaling();
 //     void ApplyRealBandwidthScaling(uint32_t target_bandwidth_bps);
 //     void ApplyPeriodicBandwidthScaling();
-
+//     void SetBandwidthScaleFactorDirect(double factor);
 
 //     // Application 接口方法
 //     virtual void StartApplication() override;
@@ -359,246 +96,199 @@
 //     double m_bandwidth_scale_factor{1.0};
 //     uint32_t m_current_estimated_bandwidth{0};
 //     uint32_t m_current_scaled_bandwidth{0};
-    
+//     // double m_bandwidth_scale_factor;
 //     // RL状态管理器
-//     RLSM* m_rlManager{nullptr};
+//     // RLSM* m_rlManager{nullptr};
 //     double m_last_reported_mu{-1.0};
     
 //     static const uint32_t BANDWIDTH_CHECK_INTERVAL_MS = 100;
 //     static const double BANDWIDTH_TOLERANCE;
+
+//     bool m_adaptive_mu{false};
+//     double ComputeMuBasedOnNetwork(); // 根据网络状态计算μ
+//     void UpdateAdaptiveMu();          // 周期性更新μ
+//     // void SetBandwidthScaleFactorDirect(double factor); // 直接设置μ
 // };   
 // }
 
 
-// #pragma once
 
-// #include <deque>
-// #include "ns3/application.h"
-// #include "ns3/socket.h"
-// #include "ns3/network-module.h"
-// #include "ns3/internet-module.h"
-// #include "ns3/callback.h"
-// #include "ns3/event-id.h"
-// #include "ns3/atomic-lock.h"
+//###############调节发送速率
+#pragma once 
 
-// #include "ns3/webrtc-config.h"
-// #include "test/scenario/transport_base.h"
-// #include "call/call.h"
+#include <deque>
+#include <random>
+#include <map>
+#include "ns3/event-id.h"
+#include "ns3/callback.h"
+#include "ns3/application.h"
+#include "ns3/socket.h"
+#include "ns3/network-module.h"
+#include "ns3/internet-module.h"
+#include "ns3/webrtc-config.h"
+#include "ns3/atomic-lock.h"
+#include "webrtc-tag.h"
+#include "test/scenario/transport_base.h"
+#include "call/call.h"
 
-// namespace ns3 {
+namespace ns3{
 
-// // ====================== Trace 回调类型 ======================
-// typedef Callback<void, uint32_t, uint32_t> TraceBandwidth;
-// // now, original_bw, scaled_bw, mu
-// typedef Callback<void, uint32_t, uint32_t, uint32_t, double> TraceScaledBandwidth;
+// RTP包的帧信息（用于发送时附加到WebrtcTag）
+struct RtpFrameInfo {
+    uint32_t frame_id;
+    uint32_t rtp_timestamp;
+    uint8_t is_keyframe;
+    uint8_t is_first_packet;
+    uint8_t is_last_packet;
+    
+    RtpFrameInfo() : frame_id(0), rtp_timestamp(0), is_keyframe(0), 
+                     is_first_packet(0), is_last_packet(0) {}
+};
 
-// // 前向声明
-// class RLSM;
-// class WebrtcSessionManager;
+// 新增：带宽缩放回调类型
+typedef Callback<void, uint32_t, uint32_t, uint32_t, double> TraceScaledBandwidth;
 
-// // ===========================================================
-// // WebrtcSender
-// // ===========================================================
-// class WebrtcSender :
-//     public webrtc::test::TransportBase,
-//     public Application
-// {
-// public:
-//     explicit WebrtcSender(WebrtcSessionManager* manager);
-//     ~WebrtcSender() override;
-
-//     // ---------------- Application ----------------
-//     void StartApplication() override;
-//     void StopApplication() override;
-
-//     // ---------------- TransportBase ----------------
-//     void Construct(webrtc::Clock*, webrtc::Call*) override {}
-//     bool SendRtp(const uint8_t* packet,
-//                  size_t length,
-//                  const webrtc::PacketOptions& options) override;
-//     bool SendRtcp(const uint8_t* packet, size_t length) override;
-
-//     // ---------------- Socket / Network ----------------
-//     void Bind(uint16_t port);
-//     void ConfigurePeer(Ipv4Address addr, uint16_t port);
-//     InetSocketAddress GetLocalAddress();
-
-//     // ---------------- Bandwidth tracing ----------------
-//     void SetBwTraceFuc(TraceBandwidth cb);
-//     void SetScaledBwTraceFuc(TraceScaledBandwidth cb);
-
-//     // ---------------- μ 控制接口（核心） ----------------
-//     void SetBandwidthScaleFactor(double factor);
-//     void SetBandwidthScaleFactorDirect(double factor);
-//     double GetBandwidthScaleFactor() const;
-//     double GetCurrentBandwidthScaleFactor() const;
-
-//     uint32_t GetScaledBandwidth(uint32_t original_bw);
-
-//     // ---------------- RL 接入 ----------------
-//     void SetRLSM(RLSM* rl_manager);
-
-//     // ---------------- 与 GCC 的“逻辑同步”（非真实调速） ----------------
-//     void ApplyBandwidthScalingToController();
-
-// private:
-//     // ================= 内部发送流程 =================
-//     void NotifyRouteChange();
-//     void DeliveryPacket();                 // ⭐ μ 在这里真正生效
-//     void SendToNetwork(Ptr<Packet> packet);
-//     void RecvPacket(Ptr<Socket> socket);
-
-// private:
-//     // ================= 运行状态 =================
-//     bool m_running{false};
-
-//     // ================= WebRTC / NS3 =================
-//     WebrtcSessionManager* m_manager{nullptr};
-//     webrtc::test::CallClient* m_client{nullptr};
-//     webrtc::Call* m_call{nullptr};
-//     webrtc::Clock* m_clock{nullptr};
-
-//     Ptr<Socket> m_socket;
-//     uint16_t m_bindPort{0};
-//     Ipv4Address m_peerIp;
-//     uint16_t m_peerPort{0};
-
-//     uint32_t m_context{0};
-//     uint64_t m_seq{1};
-
-//     // ================= RTP / RTCP Queue =================
-//     AtomicLock m_rtpLock;
-//     std::deque<rtc::CopyOnWriteBuffer> m_rtpQ;
-
-//     AtomicLock m_rtcpLock;
-//     std::deque<rtc::CopyOnWriteBuffer> m_rtcpQ;
-
-//     // ================= Trace =================
-//     int64_t m_lastTraceTime{0};
-//     TraceBandwidth m_traceBw;
-//     TraceScaledBandwidth m_traceScaledBw;
-
-//     // ================= 带宽 & μ =================
-//     double   m_bandwidth_scale_factor{1.0};
-//     uint32_t m_current_estimated_bandwidth{0};
-//     uint32_t m_current_scaled_bandwidth{0};
-
-//     // ================= Packet / Route =================
-//     uint32_t m_packetOverhead{0};
-//     uint32_t m_initial_time{0};
-
-//     // ================= RL =================
-//     RLSM* m_rlManager{nullptr};
-// };
-
-// } // namespace ns3
-
-
-// #pragma once
-
-// #include <deque>
-// #include <random>
-
-// #include "ns3/event-id.h"
-// #include "ns3/callback.h"
-// #include "ns3/application.h"
-// #include "ns3/socket.h"
-// #include "ns3/network-module.h"
-// #include "ns3/internet-module.h"
-// #include "ns3/webrtc-config.h"
-// #include "ns3/atomic-lock.h"
-
-// #include "test/scenario/transport_base.h"
-// #include "call/call.h"
-
-// namespace ns3 {
-
-// // 原始带宽 trace
-// typedef Callback<void, uint32_t, uint32_t> TraceBandwidth;
-
-// // 带 μ 缩放后的带宽 trace
-// typedef Callback<void, uint32_t, uint32_t, uint32_t, double> TraceScaledBandwidth;
-
-// // 前向声明
+// 前向声明 RLSM 类
 // class RLSM;
 
-// class WebrtcSender : public webrtc::test::TransportBase,
-//                      public Application {
-// public:
-//     explicit WebrtcSender(WebrtcSessionManager* manager);
-//     ~WebrtcSender() override;
+class WebrtcSender:public webrtc::test::TransportBase,public Application{
+public:
+    WebrtcSender(WebrtcSessionManager *manager);
+    ~WebrtcSender() override;
+    InetSocketAddress GetLocalAddress();
+    void Bind(uint16_t port);
+    void ConfigurePeer(Ipv4Address addr,uint16_t port);
+    typedef Callback<void,uint32_t,uint32_t> TraceBandwidth;
+    void SetBwTraceFuc(TraceBandwidth cb);
+    void EnableAdaptiveMu(bool enable) { m_adaptive_mu = enable; }
+    
+    // 新增：设置带宽缩放系数和回调
+    void SetBandwidthScaleFactor(double factor);
+    double GetBandwidthScaleFactor() const;
+    uint32_t GetScaledBandwidth(uint32_t original_bw);
+    void SetScaledBwTraceFuc(TraceScaledBandwidth cb);
+    
+    // 新增：RL状态管理器相关方法
+    // void SetRLSM(RLSM* rl_manager);
+    void UpdateBandwidthScaleFactor(double new_factor);
+    double GetCurrentBandwidthScaleFactor() const;
+    
+    // 新增：带宽缩放集成方法
+    void ApplyBandwidthScalingToController();
+    void VerifyBandwidthScaling();
+    void ApplyRealBandwidthScaling(uint32_t target_bandwidth_bps);
+    void ApplyPeriodicBandwidthScaling();
+    void SetBandwidthScaleFactorDirect(double factor);
+    
+    // OSCC集成：运行时动态更新μ值
+    void UpdateMuDynamic(double new_mu);
 
-//     // socket / peer
-//     InetSocketAddress GetLocalAddress();
-//     void Bind(uint16_t port);
-//     void ConfigurePeer(Ipv4Address addr, uint16_t port);
+    // 新增：由 trace 调用以请求 sender 下发目标比特率（单位 bps）
+    void SetTargetBitrate(uint32_t target_bps);
+    
+    // 跳帧相关方法
+    void SkipToFrame(uint32_t target_frame_id);  // 跳转到指定帧
+    void RequestKeyFrame();                       // 请求编码器生成关键帧
+    void ClearPendingPackets();                   // 清空待发送队列
 
-//     // trace
-//     void SetBwTraceFuc(TraceBandwidth cb);
-//     void SetScaledBwTraceFuc(TraceScaledBandwidth cb);
+    // Application 接口方法
+    virtual void StartApplication() override;
+    virtual void StopApplication() override;
 
-//     // μ 控制接口
-//     void SetBandwidthScaleFactor(double mu);
-//     double GetCurrentBandwidthScaleFactor() const;
+    // TransportBase 接口方法
+    void Construct(webrtc::Clock* sender_clock, webrtc::Call* sender_call) override{}
+    bool SendRtp(const uint8_t* packet,
+                 size_t length,
+                 const webrtc::PacketOptions& options) override;
+    bool SendRtcp(const uint8_t* packet, size_t length) override;
+    
+private:
+    void NotifyRouteChange();
+    void DeliveryPacket();
+    void SendToNetwork(Ptr<Packet> p);
+    void SendToNetworkWithFrameInfo(Ptr<Packet> p, const RtpFrameInfo& frame_info);
+    void RecvPacket(Ptr<Socket> socket);
+    
+    bool ShouldSendPacket(size_t packet_size);
+    void UpdateBandwidthLimiter();
+    void ResetBandwidthLimiter();
 
-//     // RL
-//     void SetRLSM(RLSM* rl_manager);
+    // Apply pending bitrate in node context (called via Simulator::ScheduleWithContext)
+    void ApplyPendingBitrate();
 
-//     // Application
-//     void StartApplication() override;
-//     void StopApplication() override;
+    bool m_running{false};
+    WebrtcSessionManager *m_manager{nullptr};
+    webrtc::Clock *m_clock;
+    uint16_t m_bindPort{0};
+    Ptr<Socket> m_socket;
+    Ipv4Address m_peerIp;
+    uint16_t m_peerPort{0};
+    webrtc::test::CallClient *m_client{nullptr};
+    webrtc::Call* m_call{nullptr};
+    uint64_t m_seq{1};
+    AtomicLock m_rtpLock;
+    std::deque<rtc::CopyOnWriteBuffer> m_rtpQ;
+    AtomicLock m_rtcpLock;
+    std::deque<rtc::CopyOnWriteBuffer> m_rtcpQ;
+    int64_t m_lastTraceTime{0};
+    uint32_t m_context{0};
+    TraceBandwidth m_traceBw;
+    TraceScaledBandwidth m_traceScaledBw;
+    uint32_t m_packetOverhead{0};
+    uint32_t m_initial_time{0};
+    
+    // 带宽缩放相关成员变量
+    double m_bandwidth_scale_factor{1.0};
+    uint32_t m_current_estimated_bandwidth{0};
+    uint32_t m_current_scaled_bandwidth{0};
+    double m_last_reported_mu{-1.0};
 
-//     // TransportBase
-//     void Construct(webrtc::Clock*, webrtc::Call*) override {}
-//     bool SendRtp(const uint8_t* packet,
-//                  size_t length,
-//                  const webrtc::PacketOptions& options) override;
-//     bool SendRtcp(const uint8_t* packet, size_t length) override;
+    // Debounce / pending apply members (trace -> sender)
+    uint32_t m_last_applied_scaled_bw{0};   // 最后实际下发到 transport controller 的 scaled bw
+    uint32_t m_pending_scaled_bw{0};        // 待下发的 scaled bw（由 trace 请求）
+    bool m_has_pending_bw{false};           // 是否存在待下发值
+    double m_apply_threshold_ratio{0.05};   // 去抖比例阈值（默认 5%）
+    uint32_t m_apply_threshold_abs{1000};   // 绝对阈值 (bps)，默认 1 kbps
+    
+    // OSCC动态调速：基准带宽（避免累积效应）
+    uint32_t m_base_gcc_bandwidth{0};       // 基准GCC带宽（不被缩放污染）
+    double m_last_applied_mu{1.0};          // 上次应用的μ值
 
-// private:
-//     // 内部逻辑
-//     void DeliveryPacket();
-//     void SendToNetwork(Ptr<Packet> p);
-//     void RecvPacket(Ptr<Socket> socket);
+    // used in some heuristics to suppress transient zeros
+    uint32_t m_zeroCount{0};
+    
+    // 跳帧相关成员变量
+    uint32_t m_skip_target_frame_id{UINT32_MAX};  // 跳帧目标
+    bool m_skip_frame_active{false};              // 是否正在执行跳帧
 
-// private:
-//     bool m_running{false};
+    static const uint32_t BANDWIDTH_CHECK_INTERVAL_MS = 100;
+    static const double BANDWIDTH_TOLERANCE;
 
-//     WebrtcSessionManager* m_manager{nullptr};
+    bool m_adaptive_mu{false};
+    double ComputeMuBasedOnNetwork(); // 根据网络状态计算μ
+    void UpdateAdaptiveMu();          // 周期性更新μ
+    
+    // ==================== 帧追踪相关成员 ====================
+    // RTP包帧信息队列（与m_rtpQ一一对应）
+    std::deque<RtpFrameInfo> m_rtpFrameInfoQ;
+    
+    // RTP时间戳到帧ID的映射（用于生成递增的帧ID）
+    std::map<uint32_t, uint32_t> m_rtpTimestampToFrameId;
+    uint32_t m_nextFrameId{0};  // 下一个分配的帧ID
+    uint32_t m_lastRtpTimestamp{0};  // 上一个RTP时间戳
+    
+    // 帧信息解析辅助方法
+    RtpFrameInfo ParseRtpPacketInfo(const uint8_t* packet, size_t length);
+    uint32_t GetOrCreateFrameId(uint32_t rtp_timestamp);
+    bool IsVP8KeyFrame(const uint8_t* payload, size_t payload_length);
+};   
+}
 
-//     Ptr<Socket> m_socket;
-//     Ipv4Address m_peerIp;
-//     uint16_t m_peerPort{0};
-//     uint16_t m_bindPort{0};
+// 说明（简短）：
+// - 我在头文件中添加了 SetTargetBitrate(uint32_t) 和 ApplyPendingBitrate() 的声明，并增加了私有成员用于存储/去抖/应用 pending 带宽（与之前给出的 webrtc-sender.cc 实现配套）。
+// - 请确保你在 webrtc-sender.cc 中实现的函数名与此头文件一致（SetTargetBitrate / ApplyPendingBitrate / 成员变量同名），然后重新编译。
+// - 如果需要，我可以再生成一个小补丁（diff）或帮你调整去抖阈值/最小间隔（比如要求最少 100 ms 间隔）以降低 SetSdpBitrateParameters 的调用频率。
 
-//     uint32_t m_context{0};
-
-//     // RTP / RTCP 队列
-//     AtomicLock m_rtpLock;
-//     std::deque<rtc::CopyOnWriteBuffer> m_rtpQ;
-
-//     AtomicLock m_rtcpLock;
-//     std::deque<rtc::CopyOnWriteBuffer> m_rtcpQ;
-
-//     // trace
-//     TraceBandwidth m_traceBw;
-//     TraceScaledBandwidth m_traceScaledBw;
-
-//     // μ 相关
-//     double m_bandwidth_scale_factor{1.0};
-//     double m_last_reported_mu{-1.0};
-
-//     // 关键：跨 DeliveryPacket 的发送时间轴 
-//     Time m_next_send_time;
-
-//     // RL
-//     RLSM* m_rlManager{nullptr};
-
-//     // pacing 参数
-//     static constexpr double BASE_PACING_INTERVAL_MS = 10.0;
-// };
-
-// } // namespace ns3
 
 
 // #pragma once 
@@ -662,7 +352,11 @@
 //                  size_t length,
 //                  const webrtc::PacketOptions& options) override;
 //     bool SendRtcp(const uint8_t* packet, size_t length) override;
-    
+
+
+//     void PerformFullDiagnostics(uint64_t current_time_ms);
+//     void SimpleFixTransportFeedback(uint8_t* packet, size_t length, uint64_t recv_time_ms);
+//     void CheckAndFixPacingRate();
 // private:
 //     void NotifyRouteChange();
 //     void DeliveryPacket();
@@ -672,6 +366,17 @@
 //     bool ShouldSendPacket(size_t packet_size);
 //     void UpdateBandwidthLimiter();
 //     void ResetBandwidthLimiter();
+
+//     // 新增：Pacing / Token-bucket 成员与方法（为了最小改动，保留原有接口，同时增加内部 pacing）
+//     void StartPacingLoop();
+//     void StopPacingLoop();
+//     void PacingTick(); // 被调度的成员方法
+//     std::deque<Ptr<Packet>> m_pacingQueue;
+//     EventId m_pacingEvent;
+//     double m_tokenBits;               // 当前令牌（比特）
+//     double m_pacingRateBps;           // 当前 pacing 目标速率（bps）
+//     Time m_lastPacingTime;            // 上次补充令牌时间
+//     uint32_t m_pacingTickUs{1000};    // 默认 1ms tick
 
 //     bool m_running{false};
 //     WebrtcSessionManager *m_manager{nullptr};
@@ -707,122 +412,3 @@
 //     static const double BANDWIDTH_TOLERANCE;
 // };   
 // }
-
-
-#pragma once 
-#include <deque>
-#include <random>
-#include "ns3/event-id.h"
-#include "ns3/callback.h"
-#include "ns3/application.h"
-#include "ns3/socket.h"
-#include "ns3/network-module.h"
-#include "ns3/internet-module.h"
-#include "ns3/webrtc-config.h"
-#include "ns3/atomic-lock.h"
-#include "test/scenario/transport_base.h"
-#include "call/call.h"
-
-namespace ns3{
-
-// 新增：带宽缩放回调类型
-typedef Callback<void, uint32_t, uint32_t, uint32_t, double> TraceScaledBandwidth;
-
-// 前向声明 RLSM 类
-class RLSM;
-
-class WebrtcSender:public webrtc::test::TransportBase,public Application{
-public:
-    WebrtcSender(WebrtcSessionManager *manager);
-    ~WebrtcSender() override;
-    InetSocketAddress GetLocalAddress();
-    void Bind(uint16_t port);
-    void ConfigurePeer(Ipv4Address addr,uint16_t port);
-    typedef Callback<void,uint32_t,uint32_t> TraceBandwidth;
-    void SetBwTraceFuc(TraceBandwidth cb);
-    
-    // 新增：设置带宽缩放系数和回调
-    void SetBandwidthScaleFactor(double factor);
-    void SetBandwidthScaleFactorDirect(double factor);  // 新增这一行
-    double GetBandwidthScaleFactor() const;
-    uint32_t GetScaledBandwidth(uint32_t original_bw);
-    void SetScaledBwTraceFuc(TraceScaledBandwidth cb);
-    
-    // 新增：RL状态管理器相关方法
-    void SetRLSM(RLSM* rl_manager);
-    void UpdateBandwidthScaleFactor(double new_factor);
-    double GetCurrentBandwidthScaleFactor() const;
-    
-    // 新增：带宽缩放集成方法
-    void ApplyBandwidthScalingToController();
-    void VerifyBandwidthScaling();
-    void ApplyRealBandwidthScaling(uint32_t target_bandwidth_bps);
-    void ApplyPeriodicBandwidthScaling();
-
-
-    // Application 接口方法
-    virtual void StartApplication() override;
-    virtual void StopApplication() override;
-
-    // TransportBase 接口方法
-    void Construct(webrtc::Clock* sender_clock, webrtc::Call* sender_call) override{}
-    bool SendRtp(const uint8_t* packet,
-                 size_t length,
-                 const webrtc::PacketOptions& options) override;
-    bool SendRtcp(const uint8_t* packet, size_t length) override;
-    
-private:
-    void NotifyRouteChange();
-    void DeliveryPacket();
-    void SendToNetwork(Ptr<Packet> p);
-    void RecvPacket(Ptr<Socket> socket);
-    
-    bool ShouldSendPacket(size_t packet_size);
-    void UpdateBandwidthLimiter();
-    void ResetBandwidthLimiter();
-
-    // 新增：Pacing / Token-bucket 成员与方法（为了最小改动，保留原有接口，同时增加内部 pacing）
-    void StartPacingLoop();
-    void StopPacingLoop();
-    void PacingTick(); // 被调度的成员方法
-    std::deque<Ptr<Packet>> m_pacingQueue;
-    EventId m_pacingEvent;
-    double m_tokenBits;               // 当前令牌（比特）
-    double m_pacingRateBps;           // 当前 pacing 目标速率（bps）
-    Time m_lastPacingTime;            // 上次补充令牌时间
-    uint32_t m_pacingTickUs{1000};    // 默认 1ms tick
-
-    bool m_running{false};
-    WebrtcSessionManager *m_manager{nullptr};
-    webrtc::Clock *m_clock;
-    uint16_t m_bindPort;
-    Ptr<Socket> m_socket;
-    Ipv4Address m_peerIp;
-    uint16_t m_peerPort;
-    webrtc::test::CallClient *m_client{nullptr};
-    webrtc::Call* m_call{nullptr};
-    uint64_t m_seq{1};
-    AtomicLock m_rtpLock;
-    std::deque<rtc::CopyOnWriteBuffer> m_rtpQ;
-    AtomicLock m_rtcpLock;
-    std::deque<rtc::CopyOnWriteBuffer> m_rtcpQ;
-    int64_t m_lastTraceTime{0};
-    uint32_t m_context=0;
-    TraceBandwidth m_traceBw;
-    TraceScaledBandwidth m_traceScaledBw;
-    uint32_t m_packetOverhead{0};
-    uint32_t m_initial_time{0};
-    
-    // 带宽缩放相关成员变量
-    double m_bandwidth_scale_factor{1.0};
-    uint32_t m_current_estimated_bandwidth{0};
-    uint32_t m_current_scaled_bandwidth{0};
-    
-    // RL状态管理器
-    RLSM* m_rlManager{nullptr};
-    double m_last_reported_mu{-1.0};
-    
-    static const uint32_t BANDWIDTH_CHECK_INTERVAL_MS = 100;
-    static const double BANDWIDTH_TOLERANCE;
-};   
-}

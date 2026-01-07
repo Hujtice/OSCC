@@ -132,9 +132,27 @@ void WebrtcReceiver::RecvPacket(Ptr<Socket> socket){
     packet->RemovePacketTag (tag);
     uint32_t sequence=tag.GetSequence();
     uint32_t owd=now-tag.GetTime();
+    
+    // 调用原有的trace回调
     if (!m_traceReceiptPkt.IsNull()) {
         m_traceReceiptPkt(now,sequence,owd);
     }
+    
+    // 处理帧播放管理器（如果已设置）
+    if (m_framePlayoutManager != nullptr) {
+        // 从WebrtcTag获取帧信息
+        FramePacketInfo frame_info = tag.GetFramePacketInfo(recv);
+        
+        // 通知帧播放管理器
+        m_framePlayoutManager->OnPacketReceived(frame_info, recv);
+        
+        NS_LOG_INFO("WebrtcReceiver: Packet received - seq=" << sequence 
+                     << ", frame_id=" << frame_info.frame_id
+                     << ", keyframe=" << (int)frame_info.is_keyframe
+                     << ", first=" << (int)frame_info.is_first_packet
+                     << ", last=" << (int)frame_info.is_last_packet);
+    }
+    
     if(!m_knowPeer){
         m_peerIp= InetSocketAddress::ConvertFrom (remoteAddr).GetIpv4 ();
         uint16_t port=m_peerPort;

@@ -1,6 +1,6 @@
-# project ns (3.31) configured on Mon Dec 22 14:37:15 2025 by
+# project ns (3.31) configured on Wed Jan  7 20:50:08 2026 by
 # waf 2.0.18 (abi 20, python 30808f0 on linux)
-# using ./waf configure --python=/usr/bin/python3.8
+# using ./waf configure --disable-python --enable-examples
 #
 ----------------------------------------
 Setting top to
@@ -10,7 +10,7 @@ Setting out to
 /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build
 ----------------------------------------
 Checking for 'gcc' (C compiler)
-find program=['gcc', 'cc'] paths=['/home/hjt/.vscode-server/bin/8b3775030ed1a69b13e4f4c628c612102e30a681/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='CC' -> ['/usr/bin/cc']
+find program=['gcc', 'cc'] paths=['/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='CC' -> ['/usr/bin/cc']
 ['/usr/bin/cc', '-dM', '-E', '-']
 out: #define _LP64 1
 #define __ATOMIC_ACQUIRE 2
@@ -365,7 +365,7 @@ from /home/hjt/OSCC/ns-allinone-3.31/ns-3.31: Could not find gcc/g++ (only Clang
 not found
 ----------------------------------------
 Checking for 'clang' (C compiler)
-find program=['clang'] paths=['/home/hjt/.vscode-server/bin/8b3775030ed1a69b13e4f4c628c612102e30a681/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='CC' -> ['/usr/bin/clang']
+find program=['clang'] paths=['/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='CC' -> ['/usr/bin/clang']
 ['/usr/bin/clang', '-dM', '-E', '-']
 out: #define _LP64 1
 #define __ATOMIC_ACQUIRE 2
@@ -716,15 +716,15 @@ out: #define _LP64 1
 #define linux 1
 #define unix 1
 
-find program=['llvm-ar', 'ar'] paths=['/home/hjt/.vscode-server/bin/8b3775030ed1a69b13e4f4c628c612102e30a681/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='AR' -> ['/usr/bin/ar']
-find program=['ar'] paths=['/home/hjt/.vscode-server/bin/8b3775030ed1a69b13e4f4c628c612102e30a681/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='AR' -> ['/usr/bin/ar']
+find program=['llvm-ar', 'ar'] paths=['/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='AR' -> ['/usr/bin/ar']
+find program=['ar'] paths=['/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='AR' -> ['/usr/bin/ar']
 /usr/bin/clang
 ----------------------------------------
 Checking for cc version
 6.0.0
 ----------------------------------------
 Checking for 'g++' (C++ compiler)
-find program=['g++', 'c++'] paths=['/home/hjt/.vscode-server/bin/8b3775030ed1a69b13e4f4c628c612102e30a681/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='CXX' -> ['/usr/bin/c++']
+find program=['g++', 'c++'] paths=['/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='CXX' -> ['/usr/bin/c++']
 ['/usr/bin/c++', '-dM', '-E', '-']
 out: #define _LP64 1
 #define __ATOMIC_ACQUIRE 2
@@ -1079,7 +1079,7 @@ from /home/hjt/OSCC/ns-allinone-3.31/ns-3.31: Could not find gcc/g++ (only Clang
 not found
 ----------------------------------------
 Checking for 'clang++' (C++ compiler)
-find program=['clang++'] paths=['/home/hjt/.vscode-server/bin/8b3775030ed1a69b13e4f4c628c612102e30a681/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='CXX' -> ['/usr/bin/clang++']
+find program=['clang++'] paths=['/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='CXX' -> ['/usr/bin/clang++']
 ['/usr/bin/clang++', '-dM', '-E', '-']
 out: #define _LP64 1
 #define __ATOMIC_ACQUIRE 2
@@ -1430,15 +1430,15 @@ out: #define _LP64 1
 #define linux 1
 #define unix 1
 
-find program=['llvm-ar', 'ar'] paths=['/home/hjt/.vscode-server/bin/8b3775030ed1a69b13e4f4c628c612102e30a681/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='AR' -> ['/usr/bin/ar']
-find program=['ar'] paths=['/home/hjt/.vscode-server/bin/8b3775030ed1a69b13e4f4c628c612102e30a681/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='AR' -> ['/usr/bin/ar']
+find program=['llvm-ar', 'ar'] paths=['/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='AR' -> ['/usr/bin/ar']
+find program=['ar'] paths=['/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='AR' -> ['/usr/bin/ar']
 /usr/bin/clang++
 ------------------------------------------------
 Checking for compilation flag -std=c++11 support
 ==>
 int main() { return 0; }
 <==
-[1/1] Compiling [32mbuild/.conf_check_92724e97d2a8131cdbabec48e168cdc4/test.cpp[0m
+[1/1] Compiling build/.conf_check_92724e97d2a8131cdbabec48e168cdc4/test.cpp
 
 ['/usr/bin/clang++', '-O0', '-ggdb', '-g3', '-Wall', '-Wno-unused-parameter', '-Wno-unused-local-typedefs', '-Wno-potentially-evaluated-expression', '-std=c++11', '-DNS3_BUILD_PROFILE_DEBUG', '-DNS3_ASSERT_ENABLE', '-DNS3_LOG_ENABLE', '../test.cpp', '-c', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_92724e97d2a8131cdbabec48e168cdc4/testbuild/test.cpp.1.o']
 ok
@@ -1622,25 +1622,20 @@ Checking for boost linkage
 int main() { boost::system::error_code c; }
 
 <==
-[1/2] Compiling [32mbuild/.conf_check_595f4e7318450590c0c26e80efd1c5bd/test.cpp[0m
+[1/2] Compiling build/.conf_check_595f4e7318450590c0c26e80efd1c5bd/test.cpp
 
 ['/usr/bin/clang++', '-O0', '-ggdb', '-g3', '-Wall', '-Wno-unused-parameter', '-Wno-unused-local-typedefs', '-Wno-potentially-evaluated-expression', '-std=c++11', '-I/usr/include', '-DNS3_BUILD_PROFILE_DEBUG', '-DNS3_ASSERT_ENABLE', '-DNS3_LOG_ENABLE', '../test.cpp', '-c', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_595f4e7318450590c0c26e80efd1c5bd/testbuild/test.cpp.1.o']
-[2/2] Linking [33mbuild/.conf_check_595f4e7318450590c0c26e80efd1c5bd/testbuild/testprog[0m
+[2/2] Linking build/.conf_check_595f4e7318450590c0c26e80efd1c5bd/testbuild/testprog
 
 ['/usr/bin/clang++', 'test.cpp.1.o', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_595f4e7318450590c0c26e80efd1c5bd/testbuild/testprog', '-Wl,-Bstatic', '-L/usr/lib/x86_64-linux-gnu', '-Wl,-Bdynamic', '-L/usr/lib/x86_64-linux-gnu', '-lboost_system', '-lboost_signals', '-lboost_filesystem']
 ok
-------------------------------------------------
-Checking for program 'python'
-/usr/bin/python3.8
-find program=['python'] paths=['/home/hjt/.vscode-server/bin/8b3775030ed1a69b13e4f4c628c612102e30a681/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='PYTHON' -> ['/usr/bin/python3.8']
-from /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/bindings/python: Program ['/usr/bin/python3.8'] is not executable
 ------------------------------------------------
 Checking for click location
 not found
 ------------------------------------------------
 Checking for program 'pkg-config'
 /usr/bin/pkg-config
-find program=['pkg-config'] paths=['/home/hjt/.vscode-server/bin/8b3775030ed1a69b13e4f4c628c612102e30a681/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='PKGCONFIG' -> ['/usr/bin/pkg-config']
+find program=['pkg-config'] paths=['/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='PKGCONFIG' -> ['/usr/bin/pkg-config']
 ------------------------------------------------
 Checking for 'gtk+-3.0'
 ['/usr/bin/pkg-config', '--cflags', '--libs', 'gtk+-3.0']
@@ -1675,7 +1670,7 @@ checking for uint128_t
         }
         
 <==
-[1/2] Compiling [32mbuild/.conf_check_facce93b27c0b28e5964dbe835d44fd5/test.cpp[0m
+[1/2] Compiling build/.conf_check_facce93b27c0b28e5964dbe835d44fd5/test.cpp
 
 ['/usr/bin/clang++', '-O0', '-ggdb', '-g3', '-Wall', '-Wno-unused-parameter', '-Wno-unused-local-typedefs', '-Wno-potentially-evaluated-expression', '-std=c++11', '-DNS3_BUILD_PROFILE_DEBUG', '-DNS3_ASSERT_ENABLE', '-DNS3_LOG_ENABLE', '../test.cpp', '-c', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_facce93b27c0b28e5964dbe835d44fd5/testbuild/test.cpp.1.o']
 err: ../test.cpp:6:7: error: use of undeclared identifier 'uint128_t'
@@ -1713,10 +1708,10 @@ checking for __uint128_t
         }
         
 <==
-[1/2] Compiling [32mbuild/.conf_check_b56575a1cf831cd90b0428197c1674e0/test.cpp[0m
+[1/2] Compiling build/.conf_check_b56575a1cf831cd90b0428197c1674e0/test.cpp
 
 ['/usr/bin/clang++', '-O0', '-ggdb', '-g3', '-Wall', '-Wno-unused-parameter', '-Wno-unused-local-typedefs', '-Wno-potentially-evaluated-expression', '-std=c++11', '-DNS3_BUILD_PROFILE_DEBUG', '-DNS3_ASSERT_ENABLE', '-DNS3_LOG_ENABLE', '../test.cpp', '-c', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_b56575a1cf831cd90b0428197c1674e0/testbuild/test.cpp.1.o']
-[2/2] Linking [33mbuild/.conf_check_b56575a1cf831cd90b0428197c1674e0/testbuild/testprog[0m
+[2/2] Linking build/.conf_check_b56575a1cf831cd90b0428197c1674e0/testbuild/testprog
 
 ['/usr/bin/clang++', 'test.cpp.1.o', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_b56575a1cf831cd90b0428197c1674e0/testbuild/testprog', '-Wl,-Bstatic', '-Wl,-Bdynamic']
 yes
@@ -1734,10 +1729,10 @@ int main(int argc, char **argv) {
 }
 
 <==
-[1/2] Compiling [32mbuild/.conf_check_87dc75f4d5a4d81d3de89ccc66d2f410/test.cpp[0m
+[1/2] Compiling build/.conf_check_87dc75f4d5a4d81d3de89ccc66d2f410/test.cpp
 
 ['/usr/bin/clang++', '-O0', '-ggdb', '-g3', '-Wall', '-Wno-unused-parameter', '-Wno-unused-local-typedefs', '-Wno-potentially-evaluated-expression', '-std=c++11', '-DNS3_BUILD_PROFILE_DEBUG', '-DNS3_ASSERT_ENABLE', '-DNS3_LOG_ENABLE', '-DHAVE___UINT128_T=1', '-DINT64X64_USE_128=1', '../test.cpp', '-c', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_87dc75f4d5a4d81d3de89ccc66d2f410/testbuild/test.cpp.1.o']
-[2/2] Linking [33mbuild/.conf_check_87dc75f4d5a4d81d3de89ccc66d2f410/testbuild/testprog[0m
+[2/2] Linking build/.conf_check_87dc75f4d5a4d81d3de89ccc66d2f410/testbuild/testprog
 
 ['/usr/bin/clang++', 'test.cpp.1.o', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_87dc75f4d5a4d81d3de89ccc66d2f410/testbuild/testprog', '-Wl,-Bstatic', '-Wl,-Bdynamic']
 yes
@@ -1752,10 +1747,10 @@ int main(int argc, char **argv) {
 }
 
 <==
-[1/2] Compiling [32mbuild/.conf_check_71902e4db1e1fb33866f0d1c21c77ee8/test.cpp[0m
+[1/2] Compiling build/.conf_check_71902e4db1e1fb33866f0d1c21c77ee8/test.cpp
 
 ['/usr/bin/clang++', '-O0', '-ggdb', '-g3', '-Wall', '-Wno-unused-parameter', '-Wno-unused-local-typedefs', '-Wno-potentially-evaluated-expression', '-std=c++11', '-DNS3_BUILD_PROFILE_DEBUG', '-DNS3_ASSERT_ENABLE', '-DNS3_LOG_ENABLE', '-DHAVE___UINT128_T=1', '-DINT64X64_USE_128=1', '-DHAVE_STDINT_H=1', '../test.cpp', '-c', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_71902e4db1e1fb33866f0d1c21c77ee8/testbuild/test.cpp.1.o']
-[2/2] Linking [33mbuild/.conf_check_71902e4db1e1fb33866f0d1c21c77ee8/testbuild/testprog[0m
+[2/2] Linking build/.conf_check_71902e4db1e1fb33866f0d1c21c77ee8/testbuild/testprog
 
 ['/usr/bin/clang++', 'test.cpp.1.o', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_71902e4db1e1fb33866f0d1c21c77ee8/testbuild/testprog', '-Wl,-Bstatic', '-Wl,-Bdynamic']
 yes
@@ -1770,7 +1765,7 @@ int main(int argc, char **argv) {
 }
 
 <==
-[1/2] Compiling [32mbuild/.conf_check_ab3a88ef84bcf481a1b44e59b9acea7f/test.cpp[0m
+[1/2] Compiling build/.conf_check_ab3a88ef84bcf481a1b44e59b9acea7f/test.cpp
 
 ['/usr/bin/clang++', '-O0', '-ggdb', '-g3', '-Wall', '-Wno-unused-parameter', '-Wno-unused-local-typedefs', '-Wno-potentially-evaluated-expression', '-std=c++11', '-DNS3_BUILD_PROFILE_DEBUG', '-DNS3_ASSERT_ENABLE', '-DNS3_LOG_ENABLE', '-DHAVE___UINT128_T=1', '-DINT64X64_USE_128=1', '-DHAVE_STDINT_H=1', '-DHAVE_INTTYPES_H=1', '../test.cpp', '-c', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_ab3a88ef84bcf481a1b44e59b9acea7f/testbuild/test.cpp.1.o']
 err: ../test.cpp:1:10: fatal error: 'sys/inttypes.h' file not found
@@ -1799,10 +1794,10 @@ int main(int argc, char **argv) {
 }
 
 <==
-[1/2] Compiling [32mbuild/.conf_check_a1f5eb99781ed72d6f7c486a9233dce5/test.cpp[0m
+[1/2] Compiling build/.conf_check_a1f5eb99781ed72d6f7c486a9233dce5/test.cpp
 
 ['/usr/bin/clang++', '-O0', '-ggdb', '-g3', '-Wall', '-Wno-unused-parameter', '-Wno-unused-local-typedefs', '-Wno-potentially-evaluated-expression', '-std=c++11', '-DNS3_BUILD_PROFILE_DEBUG', '-DNS3_ASSERT_ENABLE', '-DNS3_LOG_ENABLE', '-DHAVE___UINT128_T=1', '-DINT64X64_USE_128=1', '-DHAVE_STDINT_H=1', '-DHAVE_INTTYPES_H=1', '../test.cpp', '-c', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_a1f5eb99781ed72d6f7c486a9233dce5/testbuild/test.cpp.1.o']
-[2/2] Linking [33mbuild/.conf_check_a1f5eb99781ed72d6f7c486a9233dce5/testbuild/testprog[0m
+[2/2] Linking build/.conf_check_a1f5eb99781ed72d6f7c486a9233dce5/testbuild/testprog
 
 ['/usr/bin/clang++', 'test.cpp.1.o', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_a1f5eb99781ed72d6f7c486a9233dce5/testbuild/testprog', '-Wl,-Bstatic', '-Wl,-Bdynamic']
 yes
@@ -1817,10 +1812,10 @@ int main(int argc, char **argv) {
 }
 
 <==
-[1/2] Compiling [32mbuild/.conf_check_df624e4ac3a4507c87a576ef6f3a3e18/test.cpp[0m
+[1/2] Compiling build/.conf_check_df624e4ac3a4507c87a576ef6f3a3e18/test.cpp
 
 ['/usr/bin/clang++', '-O0', '-ggdb', '-g3', '-Wall', '-Wno-unused-parameter', '-Wno-unused-local-typedefs', '-Wno-potentially-evaluated-expression', '-std=c++11', '-DNS3_BUILD_PROFILE_DEBUG', '-DNS3_ASSERT_ENABLE', '-DNS3_LOG_ENABLE', '-DHAVE___UINT128_T=1', '-DINT64X64_USE_128=1', '-DHAVE_STDINT_H=1', '-DHAVE_INTTYPES_H=1', '-DHAVE_SYS_TYPES_H=1', '../test.cpp', '-c', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_df624e4ac3a4507c87a576ef6f3a3e18/testbuild/test.cpp.1.o']
-[2/2] Linking [33mbuild/.conf_check_df624e4ac3a4507c87a576ef6f3a3e18/testbuild/testprog[0m
+[2/2] Linking build/.conf_check_df624e4ac3a4507c87a576ef6f3a3e18/testbuild/testprog
 
 ['/usr/bin/clang++', 'test.cpp.1.o', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_df624e4ac3a4507c87a576ef6f3a3e18/testbuild/testprog', '-Wl,-Bstatic', '-Wl,-Bdynamic']
 yes
@@ -1835,10 +1830,10 @@ int main(int argc, char **argv) {
 }
 
 <==
-[1/2] Compiling [32mbuild/.conf_check_b1c5fd3b060471dcecfecbeb771fc0d1/test.cpp[0m
+[1/2] Compiling build/.conf_check_b1c5fd3b060471dcecfecbeb771fc0d1/test.cpp
 
 ['/usr/bin/clang++', '-O0', '-ggdb', '-g3', '-Wall', '-Wno-unused-parameter', '-Wno-unused-local-typedefs', '-Wno-potentially-evaluated-expression', '-std=c++11', '-DNS3_BUILD_PROFILE_DEBUG', '-DNS3_ASSERT_ENABLE', '-DNS3_LOG_ENABLE', '-DHAVE___UINT128_T=1', '-DINT64X64_USE_128=1', '-DHAVE_STDINT_H=1', '-DHAVE_INTTYPES_H=1', '-DHAVE_SYS_TYPES_H=1', '-DHAVE_SYS_STAT_H=1', '../test.cpp', '-c', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_b1c5fd3b060471dcecfecbeb771fc0d1/testbuild/test.cpp.1.o']
-[2/2] Linking [33mbuild/.conf_check_b1c5fd3b060471dcecfecbeb771fc0d1/testbuild/testprog[0m
+[2/2] Linking build/.conf_check_b1c5fd3b060471dcecfecbeb771fc0d1/testbuild/testprog
 
 ['/usr/bin/clang++', 'test.cpp.1.o', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_b1c5fd3b060471dcecfecbeb771fc0d1/testbuild/testprog', '-Wl,-Bstatic', '-Wl,-Bdynamic']
 yes
@@ -1853,10 +1848,10 @@ int main(int argc, char **argv) {
 }
 
 <==
-[1/2] Compiling [32mbuild/.conf_check_6f58fe0695dffc1ac60ac25f8cc70c24/test.cpp[0m
+[1/2] Compiling build/.conf_check_6f58fe0695dffc1ac60ac25f8cc70c24/test.cpp
 
 ['/usr/bin/clang++', '-O0', '-ggdb', '-g3', '-Wall', '-Wno-unused-parameter', '-Wno-unused-local-typedefs', '-Wno-potentially-evaluated-expression', '-std=c++11', '-DNS3_BUILD_PROFILE_DEBUG', '-DNS3_ASSERT_ENABLE', '-DNS3_LOG_ENABLE', '-DHAVE___UINT128_T=1', '-DINT64X64_USE_128=1', '-DHAVE_STDINT_H=1', '-DHAVE_INTTYPES_H=1', '-DHAVE_SYS_TYPES_H=1', '-DHAVE_SYS_STAT_H=1', '-DHAVE_DIRENT_H=1', '../test.cpp', '-c', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_6f58fe0695dffc1ac60ac25f8cc70c24/testbuild/test.cpp.1.o']
-[2/2] Linking [33mbuild/.conf_check_6f58fe0695dffc1ac60ac25f8cc70c24/testbuild/testprog[0m
+[2/2] Linking build/.conf_check_6f58fe0695dffc1ac60ac25f8cc70c24/testbuild/testprog
 
 ['/usr/bin/clang++', 'test.cpp.1.o', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_6f58fe0695dffc1ac60ac25f8cc70c24/testbuild/testprog', '-Wl,-Bstatic', '-Wl,-Bdynamic']
 yes
@@ -1873,10 +1868,10 @@ int main ()
 }
 
 <==
-[1/2] Compiling [32mbuild/.conf_check_f7c0fffd93df9fe1a80ff12c0ddf12dd/test.cpp[0m
+[1/2] Compiling build/.conf_check_f7c0fffd93df9fe1a80ff12c0ddf12dd/test.cpp
 
 ['/usr/bin/clang++', '-O0', '-ggdb', '-g3', '-Wall', '-Wno-unused-parameter', '-Wno-unused-local-typedefs', '-Wno-potentially-evaluated-expression', '-std=c++11', '-pthread', '-DNS3_BUILD_PROFILE_DEBUG', '-DNS3_ASSERT_ENABLE', '-DNS3_LOG_ENABLE', '-DHAVE___UINT128_T=1', '-DINT64X64_USE_128=1', '-DHAVE_STDINT_H=1', '-DHAVE_INTTYPES_H=1', '-DHAVE_SYS_TYPES_H=1', '-DHAVE_SYS_STAT_H=1', '-DHAVE_DIRENT_H=1', '-DHAVE_SIGNAL_H=1', '../test.cpp', '-c', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_f7c0fffd93df9fe1a80ff12c0ddf12dd/testbuild/test.cpp.1.o']
-[2/2] Linking [33mbuild/.conf_check_f7c0fffd93df9fe1a80ff12c0ddf12dd/testbuild/testprog[0m
+[2/2] Linking build/.conf_check_f7c0fffd93df9fe1a80ff12c0ddf12dd/testbuild/testprog
 
 ['/usr/bin/clang++', '-pthread', 'test.cpp.1.o', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_f7c0fffd93df9fe1a80ff12c0ddf12dd/testbuild/testprog', '-Wl,-Bstatic', '-Wl,-Bdynamic']
 yes
@@ -1891,10 +1886,10 @@ int main(int argc, char **argv) {
 }
 
 <==
-[1/2] Compiling [32mbuild/.conf_check_87dc75f4d5a4d81d3de89ccc66d2f410/test.cpp[0m
+[1/2] Compiling build/.conf_check_87dc75f4d5a4d81d3de89ccc66d2f410/test.cpp
 
 ['/usr/bin/clang++', '-O0', '-ggdb', '-g3', '-Wall', '-Wno-unused-parameter', '-Wno-unused-local-typedefs', '-Wno-potentially-evaluated-expression', '-std=c++11', '-DNS3_BUILD_PROFILE_DEBUG', '-DNS3_ASSERT_ENABLE', '-DNS3_LOG_ENABLE', '-DHAVE___UINT128_T=1', '-DINT64X64_USE_128=1', '-DHAVE_INTTYPES_H=1', '-DHAVE_SYS_TYPES_H=1', '-DHAVE_SYS_STAT_H=1', '-DHAVE_DIRENT_H=1', '-DHAVE_SIGNAL_H=1', '-DHAVE_PTHREAD_H=1', '../test.cpp', '-c', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_87dc75f4d5a4d81d3de89ccc66d2f410/testbuild/test.cpp.1.o']
-[2/2] Linking [33mbuild/.conf_check_87dc75f4d5a4d81d3de89ccc66d2f410/testbuild/testprog[0m
+[2/2] Linking build/.conf_check_87dc75f4d5a4d81d3de89ccc66d2f410/testbuild/testprog
 
 ['/usr/bin/clang++', 'test.cpp.1.o', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_87dc75f4d5a4d81d3de89ccc66d2f410/testbuild/testprog', '-Wl,-Bstatic', '-Wl,-Bdynamic']
 yes
@@ -1909,10 +1904,10 @@ int main(int argc, char **argv) {
 }
 
 <==
-[1/2] Compiling [32mbuild/.conf_check_71902e4db1e1fb33866f0d1c21c77ee8/test.cpp[0m
+[1/2] Compiling build/.conf_check_71902e4db1e1fb33866f0d1c21c77ee8/test.cpp
 
 ['/usr/bin/clang++', '-O0', '-ggdb', '-g3', '-Wall', '-Wno-unused-parameter', '-Wno-unused-local-typedefs', '-Wno-potentially-evaluated-expression', '-std=c++11', '-DNS3_BUILD_PROFILE_DEBUG', '-DNS3_ASSERT_ENABLE', '-DNS3_LOG_ENABLE', '-DHAVE___UINT128_T=1', '-DINT64X64_USE_128=1', '-DHAVE_SYS_TYPES_H=1', '-DHAVE_SYS_STAT_H=1', '-DHAVE_DIRENT_H=1', '-DHAVE_SIGNAL_H=1', '-DHAVE_PTHREAD_H=1', '-DHAVE_STDINT_H=1', '../test.cpp', '-c', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_71902e4db1e1fb33866f0d1c21c77ee8/testbuild/test.cpp.1.o']
-[2/2] Linking [33mbuild/.conf_check_71902e4db1e1fb33866f0d1c21c77ee8/testbuild/testprog[0m
+[2/2] Linking build/.conf_check_71902e4db1e1fb33866f0d1c21c77ee8/testbuild/testprog
 
 ['/usr/bin/clang++', 'test.cpp.1.o', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_71902e4db1e1fb33866f0d1c21c77ee8/testbuild/testprog', '-Wl,-Bstatic', '-Wl,-Bdynamic']
 yes
@@ -1927,7 +1922,7 @@ int main(int argc, char **argv) {
 }
 
 <==
-[1/2] Compiling [32mbuild/.conf_check_ab3a88ef84bcf481a1b44e59b9acea7f/test.cpp[0m
+[1/2] Compiling build/.conf_check_ab3a88ef84bcf481a1b44e59b9acea7f/test.cpp
 
 ['/usr/bin/clang++', '-O0', '-ggdb', '-g3', '-Wall', '-Wno-unused-parameter', '-Wno-unused-local-typedefs', '-Wno-potentially-evaluated-expression', '-std=c++11', '-DNS3_BUILD_PROFILE_DEBUG', '-DNS3_ASSERT_ENABLE', '-DNS3_LOG_ENABLE', '-DHAVE___UINT128_T=1', '-DINT64X64_USE_128=1', '-DHAVE_SYS_TYPES_H=1', '-DHAVE_SYS_STAT_H=1', '-DHAVE_DIRENT_H=1', '-DHAVE_SIGNAL_H=1', '-DHAVE_PTHREAD_H=1', '-DHAVE_STDINT_H=1', '-DHAVE_INTTYPES_H=1', '../test.cpp', '-c', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_ab3a88ef84bcf481a1b44e59b9acea7f/testbuild/test.cpp.1.o']
 err: ../test.cpp:1:10: fatal error: 'sys/inttypes.h' file not found
@@ -1955,10 +1950,10 @@ int main(int argc, char **argv) {
 }
 
 <==
-[1/2] Compiling [32mbuild/.conf_check_ab72690583f2973c46ae66ff926bf40d/test.cpp[0m
+[1/2] Compiling build/.conf_check_ab72690583f2973c46ae66ff926bf40d/test.cpp
 
 ['/usr/bin/clang++', '-O0', '-ggdb', '-g3', '-Wall', '-Wno-unused-parameter', '-Wno-unused-local-typedefs', '-Wno-potentially-evaluated-expression', '-std=c++11', '-pthread', '-DNS3_BUILD_PROFILE_DEBUG', '-DNS3_ASSERT_ENABLE', '-DNS3_LOG_ENABLE', '-DHAVE___UINT128_T=1', '-DINT64X64_USE_128=1', '-DHAVE_SYS_TYPES_H=1', '-DHAVE_SYS_STAT_H=1', '-DHAVE_DIRENT_H=1', '-DHAVE_SIGNAL_H=1', '-DHAVE_PTHREAD_H=1', '-DHAVE_STDINT_H=1', '-DHAVE_INTTYPES_H=1', '../test.cpp', '-c', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_ab72690583f2973c46ae66ff926bf40d/testbuild/test.cpp.1.o']
-[2/2] Linking [33mbuild/.conf_check_ab72690583f2973c46ae66ff926bf40d/testbuild/testprog[0m
+[2/2] Linking build/.conf_check_ab72690583f2973c46ae66ff926bf40d/testbuild/testprog
 
 ['/usr/bin/clang++', '-pthread', 'test.cpp.1.o', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_ab72690583f2973c46ae66ff926bf40d/testbuild/testprog', '-Wl,-Bstatic', '-Wl,-Bdynamic', '-lrt']
 yes
@@ -1972,10 +1967,10 @@ int main(int argc, char **argv) {
 }
 
 <==
-[1/2] Compiling [32mbuild/.conf_check_b0f6c2045206f42c2812a3d0a1d97f8c/test.cpp[0m
+[1/2] Compiling build/.conf_check_b0f6c2045206f42c2812a3d0a1d97f8c/test.cpp
 
 ['/usr/bin/clang++', '-O0', '-ggdb', '-g3', '-Wall', '-Wno-unused-parameter', '-Wno-unused-local-typedefs', '-Wno-potentially-evaluated-expression', '-std=c++11', '-I/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/src/ex-webrtc/webrtc/src', '-I/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/src/ex-webrtc/webrtc/src/third_party/abseil-cpp', '-DNS3_BUILD_PROFILE_DEBUG', '-DNS3_ASSERT_ENABLE', '-DNS3_LOG_ENABLE', '../test.cpp', '-c', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_b0f6c2045206f42c2812a3d0a1d97f8c/testbuild/test.cpp.1.o']
-[2/2] Linking [33mbuild/.conf_check_b0f6c2045206f42c2812a3d0a1d97f8c/testbuild/testprog[0m
+[2/2] Linking build/.conf_check_b0f6c2045206f42c2812a3d0a1d97f8c/testbuild/testprog
 
 ['/usr/bin/clang++', 'test.cpp.1.o', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_b0f6c2045206f42c2812a3d0a1d97f8c/testbuild/testprog', '-Wl,-Bstatic', '-Wl,-Bdynamic', '-L/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/src/ex-webrtc/webrtc/src/out/m84/obj', '-lwebrtc']
 yes
@@ -1990,10 +1985,10 @@ int main(int argc, char **argv) {
 }
 
 <==
-[1/2] Compiling [32mbuild/.conf_check_a500e4e04895f8dce012d09437dc914c/test.cpp[0m
+[1/2] Compiling build/.conf_check_a500e4e04895f8dce012d09437dc914c/test.cpp
 
 ['/usr/bin/clang++', '-O0', '-ggdb', '-g3', '-Wall', '-Wno-unused-parameter', '-Wno-unused-local-typedefs', '-Wno-potentially-evaluated-expression', '-std=c++11', '-std=c++14', '-I/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/src/ex-webrtc/webrtc/src', '-I/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/src/ex-webrtc/webrtc/src/third_party/abseil-cpp', '-Wno-unused-const-variable', '-Wno-unused-private-field', '-DNS3_BUILD_PROFILE_DEBUG', '-DNS3_ASSERT_ENABLE', '-DNS3_LOG_ENABLE', '../test.cpp', '-c', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_a500e4e04895f8dce012d09437dc914c/testbuild/test.cpp.1.o']
-[2/2] Linking [33mbuild/.conf_check_a500e4e04895f8dce012d09437dc914c/testbuild/testprog[0m
+[2/2] Linking build/.conf_check_a500e4e04895f8dce012d09437dc914c/testbuild/testprog
 
 ['/usr/bin/clang++', 'test.cpp.1.o', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_a500e4e04895f8dce012d09437dc914c/testbuild/testprog', '-Wl,-Bstatic', '-Wl,-Bdynamic']
 yes
@@ -2008,10 +2003,10 @@ int main(int argc, char **argv) {
 }
 
 <==
-[1/2] Compiling [32mbuild/.conf_check_9f4e1a1ff328a1e8411b45269d846fdb/test.cpp[0m
+[1/2] Compiling build/.conf_check_9f4e1a1ff328a1e8411b45269d846fdb/test.cpp
 
 ['/usr/bin/clang++', '-O0', '-ggdb', '-g3', '-Wall', '-Wno-unused-parameter', '-Wno-unused-local-typedefs', '-Wno-potentially-evaluated-expression', '-std=c++11', '-std=c++14', '-I/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/src/ex-webrtc/webrtc/src', '-I/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/src/ex-webrtc/webrtc/src/third_party/abseil-cpp', '-Wno-unused-const-variable', '-Wno-unused-private-field', '-DNS3_BUILD_PROFILE_DEBUG', '-DNS3_ASSERT_ENABLE', '-DNS3_LOG_ENABLE', '-DHAVE_SYS_IOCTL_H=1', '../test.cpp', '-c', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_9f4e1a1ff328a1e8411b45269d846fdb/testbuild/test.cpp.1.o']
-[2/2] Linking [33mbuild/.conf_check_9f4e1a1ff328a1e8411b45269d846fdb/testbuild/testprog[0m
+[2/2] Linking build/.conf_check_9f4e1a1ff328a1e8411b45269d846fdb/testbuild/testprog
 
 ['/usr/bin/clang++', 'test.cpp.1.o', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_9f4e1a1ff328a1e8411b45269d846fdb/testbuild/testprog', '-Wl,-Bstatic', '-Wl,-Bdynamic']
 yes
@@ -2026,10 +2021,10 @@ int main(int argc, char **argv) {
 }
 
 <==
-[1/2] Compiling [32mbuild/.conf_check_6e41348326de2b334c4f59de3729bd6a/test.cpp[0m
+[1/2] Compiling build/.conf_check_6e41348326de2b334c4f59de3729bd6a/test.cpp
 
 ['/usr/bin/clang++', '-O0', '-ggdb', '-g3', '-Wall', '-Wno-unused-parameter', '-Wno-unused-local-typedefs', '-Wno-potentially-evaluated-expression', '-std=c++11', '-std=c++14', '-I/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/src/ex-webrtc/webrtc/src', '-I/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/src/ex-webrtc/webrtc/src/third_party/abseil-cpp', '-Wno-unused-const-variable', '-Wno-unused-private-field', '-DNS3_BUILD_PROFILE_DEBUG', '-DNS3_ASSERT_ENABLE', '-DNS3_LOG_ENABLE', '-DHAVE_SYS_IOCTL_H=1', '-DHAVE_IF_NETS_H=1', '../test.cpp', '-c', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_6e41348326de2b334c4f59de3729bd6a/testbuild/test.cpp.1.o']
-[2/2] Linking [33mbuild/.conf_check_6e41348326de2b334c4f59de3729bd6a/testbuild/testprog[0m
+[2/2] Linking build/.conf_check_6e41348326de2b334c4f59de3729bd6a/testbuild/testprog
 
 ['/usr/bin/clang++', 'test.cpp.1.o', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_6e41348326de2b334c4f59de3729bd6a/testbuild/testprog', '-Wl,-Bstatic', '-Wl,-Bdynamic']
 yes
@@ -2044,10 +2039,10 @@ int main(int argc, char **argv) {
 }
 
 <==
-[1/2] Compiling [32mbuild/.conf_check_8e878b6598e0eb4487674343c0115934/test.cpp[0m
+[1/2] Compiling build/.conf_check_8e878b6598e0eb4487674343c0115934/test.cpp
 
 ['/usr/bin/clang++', '-O0', '-ggdb', '-g3', '-Wall', '-Wno-unused-parameter', '-Wno-unused-local-typedefs', '-Wno-potentially-evaluated-expression', '-std=c++11', '-std=c++14', '-I/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/src/ex-webrtc/webrtc/src', '-I/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/src/ex-webrtc/webrtc/src/third_party/abseil-cpp', '-Wno-unused-const-variable', '-Wno-unused-private-field', '-DNS3_BUILD_PROFILE_DEBUG', '-DNS3_ASSERT_ENABLE', '-DNS3_LOG_ENABLE', '-DHAVE_SYS_IOCTL_H=1', '-DHAVE_IF_NETS_H=1', '-DHAVE_NET_ETHERNET_H=1', '../test.cpp', '-c', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_8e878b6598e0eb4487674343c0115934/testbuild/test.cpp.1.o']
-[2/2] Linking [33mbuild/.conf_check_8e878b6598e0eb4487674343c0115934/testbuild/testprog[0m
+[2/2] Linking build/.conf_check_8e878b6598e0eb4487674343c0115934/testbuild/testprog
 
 ['/usr/bin/clang++', 'test.cpp.1.o', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_8e878b6598e0eb4487674343c0115934/testbuild/testprog', '-Wl,-Bstatic', '-Wl,-Bdynamic']
 yes
@@ -2062,10 +2057,10 @@ int main(int argc, char **argv) {
 }
 
 <==
-[1/2] Compiling [32mbuild/.conf_check_fff5469bff6310ddc2b775af42c41fc5/test.cpp[0m
+[1/2] Compiling build/.conf_check_fff5469bff6310ddc2b775af42c41fc5/test.cpp
 
 ['/usr/bin/clang++', '-O0', '-ggdb', '-g3', '-Wall', '-Wno-unused-parameter', '-Wno-unused-local-typedefs', '-Wno-potentially-evaluated-expression', '-std=c++11', '-std=c++14', '-I/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/src/ex-webrtc/webrtc/src', '-I/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/src/ex-webrtc/webrtc/src/third_party/abseil-cpp', '-Wno-unused-const-variable', '-Wno-unused-private-field', '-DNS3_BUILD_PROFILE_DEBUG', '-DNS3_ASSERT_ENABLE', '-DNS3_LOG_ENABLE', '-DHAVE_SYS_IOCTL_H=1', '-DHAVE_IF_NETS_H=1', '-DHAVE_NET_ETHERNET_H=1', '-DHAVE_IF_TUN_H=1', '../test.cpp', '-c', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_fff5469bff6310ddc2b775af42c41fc5/testbuild/test.cpp.1.o']
-[2/2] Linking [33mbuild/.conf_check_fff5469bff6310ddc2b775af42c41fc5/testbuild/testprog[0m
+[2/2] Linking build/.conf_check_fff5469bff6310ddc2b775af42c41fc5/testbuild/testprog
 
 ['/usr/bin/clang++', 'test.cpp.1.o', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_fff5469bff6310ddc2b775af42c41fc5/testbuild/testprog', '-Wl,-Bstatic', '-Wl,-Bdynamic']
 yes
@@ -2092,10 +2087,10 @@ int main(int argc, char **argv) {
 }
 
 <==
-[1/2] Compiling [32mbuild/.conf_check_2966f45c89888a4b8f2a3b90cda9d602/test.cpp[0m
+[1/2] Compiling build/.conf_check_2966f45c89888a4b8f2a3b90cda9d602/test.cpp
 
 ['/usr/bin/clang++', '-O0', '-ggdb', '-g3', '-Wall', '-Wno-unused-parameter', '-Wno-unused-local-typedefs', '-Wno-potentially-evaluated-expression', '-std=c++11', '-std=c++14', '-I/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/src/ex-webrtc/webrtc/src', '-I/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/src/ex-webrtc/webrtc/src/third_party/abseil-cpp', '-Wno-unused-const-variable', '-Wno-unused-private-field', '-DNS3_BUILD_PROFILE_DEBUG', '-DNS3_ASSERT_ENABLE', '-DNS3_LOG_ENABLE', '-DHAVE_SYS_IOCTL_H=1', '-DHAVE_IF_NETS_H=1', '-DHAVE_NET_ETHERNET_H=1', '-DHAVE_IF_TUN_H=1', '-DHAVE_PACKET_H=1', '-DHAVE_SQLITE3=1', '../test.cpp', '-c', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_2966f45c89888a4b8f2a3b90cda9d602/testbuild/test.cpp.1.o']
-[2/2] Linking [33mbuild/.conf_check_2966f45c89888a4b8f2a3b90cda9d602/testbuild/testprog[0m
+[2/2] Linking build/.conf_check_2966f45c89888a4b8f2a3b90cda9d602/testbuild/testprog
 
 ['/usr/bin/clang++', 'test.cpp.1.o', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_2966f45c89888a4b8f2a3b90cda9d602/testbuild/testprog', '-Wl,-Bstatic', '-Wl,-Bdynamic']
 yes
@@ -2110,21 +2105,21 @@ int main(int argc, char **argv) {
 }
 
 <==
-[1/2] Compiling [32mbuild/.conf_check_8e878b6598e0eb4487674343c0115934/test.cpp[0m
+[1/2] Compiling build/.conf_check_8e878b6598e0eb4487674343c0115934/test.cpp
 
 ['/usr/bin/clang++', '-O0', '-ggdb', '-g3', '-Wall', '-Wno-unused-parameter', '-Wno-unused-local-typedefs', '-Wno-potentially-evaluated-expression', '-std=c++11', '-std=c++14', '-I/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/src/ex-webrtc/webrtc/src', '-I/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/src/ex-webrtc/webrtc/src/third_party/abseil-cpp', '-Wno-unused-const-variable', '-Wno-unused-private-field', '-DNS3_BUILD_PROFILE_DEBUG', '-DNS3_ASSERT_ENABLE', '-DNS3_LOG_ENABLE', '../test.cpp', '-c', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_8e878b6598e0eb4487674343c0115934/testbuild/test.cpp.1.o']
-[2/2] Linking [33mbuild/.conf_check_8e878b6598e0eb4487674343c0115934/testbuild/testprog[0m
+[2/2] Linking build/.conf_check_8e878b6598e0eb4487674343c0115934/testbuild/testprog
 
 ['/usr/bin/clang++', 'test.cpp.1.o', '-o/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/build/.conf_check_8e878b6598e0eb4487674343c0115934/testbuild/testprog', '-Wl,-Bstatic', '-Wl,-Bdynamic']
 yes
 ------------------------------------------------
 Checking for program 'sudo'
 /usr/bin/sudo
-find program=['sudo'] paths=['/home/hjt/.vscode-server/bin/8b3775030ed1a69b13e4f4c628c612102e30a681/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='SUDO' -> ['/usr/bin/sudo']
+find program=['sudo'] paths=['/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='SUDO' -> ['/usr/bin/sudo']
 ------------------------------------------------
 Checking for program 'valgrind'
 /usr/bin/valgrind
-find program=['valgrind'] paths=['/home/hjt/.vscode-server/bin/8b3775030ed1a69b13e4f4c628c612102e30a681/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='VALGRIND' -> ['/usr/bin/valgrind']
+find program=['valgrind'] paths=['/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='VALGRIND' -> ['/usr/bin/valgrind']
 ------------------------------------------------
 Checking for 'gsl'
 ['/usr/bin/pkg-config', '--cflags', '--libs', 'gsl']
@@ -2138,9 +2133,9 @@ from /home/hjt/OSCC/ns-allinone-3.31/ns-3.31: The configuration failed
 ------------------------------------------------
 libgcrypt-config
 not found
-find program=['libgcrypt-config'] paths=['/home/hjt/.vscode-server/bin/8b3775030ed1a69b13e4f4c628c612102e30a681/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='LIBGCRYPT_CONFIG' -> None
+find program=['libgcrypt-config'] paths=['/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='LIBGCRYPT_CONFIG' -> None
 from /home/hjt/OSCC/ns-allinone-3.31/ns-3.31: Could not find the program ['libgcrypt-config']
 ------------------------------------------------
 Checking for program 'doxygen'
 /usr/bin/doxygen
-find program=['doxygen'] paths=['/home/hjt/.vscode-server/bin/8b3775030ed1a69b13e4f4c628c612102e30a681/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='DOXYGEN' -> ['/usr/bin/doxygen']
+find program=['doxygen'] paths=['/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/home/hjt/.cursor-server/bin/20adc1003928b0f1b99305dbaf845656ff81f5d0/bin/remote-cli', '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/usr/games', '/usr/local/games', '/snap/bin'] var='DOXYGEN' -> ['/usr/bin/doxygen']

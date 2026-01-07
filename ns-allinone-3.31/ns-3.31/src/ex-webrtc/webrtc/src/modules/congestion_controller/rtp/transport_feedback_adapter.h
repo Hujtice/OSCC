@@ -544,6 +544,247 @@
 // #endif  // MODULES_CONGESTION_CONTROLLER_RTP_TRANSPORT_FEEDBACK_ADAPTER_H_
 
 
+
+
+
+
+
+// #ifndef MODULES_CONGESTION_CONTROLLER_RTP_TRANSPORT_FEEDBACK_ADAPTER_H_
+// #define MODULES_CONGESTION_CONTROLLER_RTP_TRANSPORT_FEEDBACK_ADAPTER_H_
+
+// #include <deque>
+// #include <map>
+// #include <utility>
+// #include <vector>
+// #include <algorithm>
+// #include <cmath>
+// #include <iostream>
+
+// #include "api/transport/network_types.h"
+// #include "modules/include/module_common_types_public.h"
+// #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
+// #include "rtc_base/critical_section.h"
+// #include "rtc_base/network/sent_packet.h"
+// #include "rtc_base/network_route.h"
+// #include "rtc_base/thread_annotations.h"
+// #include "rtc_base/thread_checker.h"
+// #include "api/units/timestamp.h"
+// #include "api/units/time_delta.h"
+
+// namespace webrtc {
+
+// // ------------------- Simple Packet Feedback --------------------
+// struct SimplePacketFeedback {
+//   Timestamp creation_time = Timestamp::MinusInfinity();
+//   int64_t send_time_ms = 0;
+//   size_t size = 0;
+//   uint16_t transport_sequence_number = 0;
+//   Timestamp receive_time = Timestamp::PlusInfinity();
+// };
+
+// // ------------------- Simple In-Flight Bytes Tracker -------------------
+// class SimpleInFlightBytesTracker {
+//  public:
+//   void AddInFlightPacketBytes(const SimplePacketFeedback& packet) {
+//     in_flight_data_ += packet.size;
+//   }
+
+//   void RemoveInFlightPacketBytes(const SimplePacketFeedback& packet) {
+//     if (in_flight_data_ >= packet.size) {
+//       in_flight_data_ -= packet.size;
+//     } else {
+//       in_flight_data_ = 0;
+//     }
+//   }
+
+//   size_t GetOutstandingData() const { return in_flight_data_; }
+
+//  private:
+//   size_t in_flight_data_ = 0;
+// };
+
+// // ======================= TransportFeedbackAdapter =========================
+// class TransportFeedbackAdapter {
+//  public:
+//   TransportFeedbackAdapter()
+//       : bandwidth_scale_factor_(1.0),
+//         bandwidth_scaling_enabled_(false),
+//         last_feedback_time_(Timestamp::MinusInfinity()) {
+//     std::cout << "[TFA] Initialized" << std::endl;
+//   }
+
+//   // ----------------------- Add Packet ------------------------
+//   void AddPacket(const RtpPacketSendInfo& packet_info,
+//                  size_t overhead_bytes,
+//                  Timestamp creation_time) {
+//     SimplePacketFeedback feedback;
+//     feedback.creation_time = creation_time;
+//     feedback.send_time_ms = creation_time.ms();
+//     feedback.size = 1200 + overhead_bytes;  // simplified RTP packet size
+//     feedback.transport_sequence_number = packet_info.transport_sequence_number;
+
+//     int64_t seq_num = seq_num_unwrapper_.Unwrap(packet_info.transport_sequence_number);
+//     simple_history_[seq_num] = feedback;
+
+//     in_flight_tracker_.AddInFlightPacketBytes(feedback);
+
+//     std::cout << "[TFA] AddPacket seq=" << feedback.transport_sequence_number
+//               << " size=" << feedback.size << std::endl;
+//   }
+
+//   // -------------------- Process Sent Packet --------------------
+//   absl::optional<SentPacket> ProcessSentPacket(const rtc::SentPacket& sent_packet) {
+//     return absl::nullopt;
+//   }
+
+//   // -------------------- Process Feedback ----------------------
+//   absl::optional<TransportPacketsFeedback> ProcessTransportFeedback(
+//       const rtcp::TransportFeedback& feedback,
+//       Timestamp feedback_receive_time) {
+//     std::cout << "[TFA] ProcessTransportFeedback" << std::endl;
+
+//     TransportPacketsFeedback result;
+//     result.feedback_time = ApplyBandwidthScalingToFeedbackTime(feedback_receive_time);
+
+//     std::vector<PacketResult> packet_results;
+
+//     if (bandwidth_scaling_enabled_ && bandwidth_scale_factor_ != 1.0) {
+//       PacketResult pr;
+//       pr.sent_packet.send_time = Timestamp::Millis(1000);
+//       pr.sent_packet.size = DataSize::Bytes(1200);
+//       pr.sent_packet.sequence_number = 1;
+
+//       if (bandwidth_scale_factor_ < 1.0) {
+//         pr.receive_time = result.feedback_time +
+//                           TimeDelta::Millis(50 * (1.0 - bandwidth_scale_factor_));
+//       } else {
+//         pr.receive_time = result.feedback_time;
+//       }
+
+//       packet_results.push_back(pr);
+//     }
+
+//     result.packet_feedbacks = packet_results;
+//     UpdateInFlightBytes(result);
+
+//     std::cout << "[TFA] Feedback done scale=" << bandwidth_scale_factor_ << std::endl;
+
+//     return result;
+//   }
+
+//   // ----------------------- Network Route ----------------------
+//   void SetNetworkRoute(const rtc::NetworkRoute& route) {
+//     current_network_route_ = route;
+//   }
+
+//   size_t GetOutstandingData() const {
+//     return in_flight_tracker_.GetOutstandingData();
+//   }
+
+//   // ===================== Bandwidth Scaling Interface =========================
+
+//   void SetBandwidthScaleFactor(double factor) {
+//     rtc::CritScope cs(&bandwidth_crit_);
+//     bandwidth_scale_factor_ = std::max(0.1, std::min(factor, 2.0));
+//     std::cout << "[TFA] Set scale=" << bandwidth_scale_factor_ << std::endl;
+//   }
+
+//   double GetBandwidthScaleFactor() const {
+//     rtc::CritScope cs(&bandwidth_crit_);
+//     return bandwidth_scale_factor_;
+//   }
+
+//   void EnableBandwidthScaling(bool enable) {
+//     rtc::CritScope cs(&bandwidth_crit_);
+//     bandwidth_scaling_enabled_ = enable;
+//     last_feedback_time_ = Timestamp::MinusInfinity();
+//     std::cout << "[TFA] Scaling " << (enable ? "ENABLED" : "DISABLED") << std::endl;
+//   }
+
+//   DataRate ApplyBandwidthScalingToEstimate(DataRate estimate) {
+//     rtc::CritScope cs(&bandwidth_crit_);
+//     if (bandwidth_scaling_enabled_ && bandwidth_scale_factor_ != 1.0) {
+//       return estimate * bandwidth_scale_factor_;
+//     }
+//     return estimate;
+//   }
+
+//   void PrintStatus() const {
+//     rtc::CritScope cs(&bandwidth_crit_);
+//     std::cout << "[TFA] Status: enabled=" << bandwidth_scaling_enabled_
+//               << " scale=" << bandwidth_scale_factor_ << std::endl;
+//   }
+
+//  private:
+//   // --------------------- Scale Feedback Time --------------------
+//   Timestamp ApplyBandwidthScalingToFeedbackTime(Timestamp original) {
+//     rtc::CritScope cs(&bandwidth_crit_);
+
+//     if (!bandwidth_scaling_enabled_ || bandwidth_scale_factor_ == 1.0)
+//       return original;
+
+//     if (last_feedback_time_.IsMinusInfinity()) {
+//       last_feedback_time_ = original;
+//       return original;
+//     }
+
+//     TimeDelta delta = original - last_feedback_time_;
+//     TimeDelta scaled = delta * (1.0 / bandwidth_scale_factor_);
+
+//     if (scaled < TimeDelta::Millis(1))
+//       scaled = TimeDelta::Millis(1);
+
+//     Timestamp new_time = last_feedback_time_ + scaled;
+//     last_feedback_time_ = new_time;
+
+//     return new_time;
+//   }
+
+//   // --------------------- Update Bytes --------------------------
+//   void UpdateInFlightBytes(const TransportPacketsFeedback& fb) {
+//     for (const auto& pr : fb.packet_feedbacks) {
+//       if (pr.receive_time.IsFinite()) {
+//         SimplePacketFeedback sf;
+//         sf.size = pr.sent_packet.size.bytes();
+//         in_flight_tracker_.RemoveInFlightPacketBytes(sf);
+//       }
+//     }
+//   }
+
+//   // -------------------- Members --------------------
+//   SequenceNumberUnwrapper seq_num_unwrapper_;
+//   std::map<int64_t, SimplePacketFeedback> simple_history_;
+//   SimpleInFlightBytesTracker in_flight_tracker_;
+//   rtc::NetworkRoute current_network_route_;
+
+//   // ---- bandwidth scaling ----
+//   double bandwidth_scale_factor_;
+//   bool bandwidth_scaling_enabled_;
+//   Timestamp last_feedback_time_;
+//   mutable rtc::CriticalSection bandwidth_crit_;
+// };
+
+// }  // namespace webrtc
+
+// #endif  // MODULES_CONGESTION_CONTROLLER_RTP_TRANSPORT_FEEDBACK_ADAPTER_H_
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #ifndef MODULES_CONGESTION_CONTROLLER_RTP_TRANSPORT_FEEDBACK_ADAPTER_H_
 #define MODULES_CONGESTION_CONTROLLER_RTP_TRANSPORT_FEEDBACK_ADAPTER_H_
 

@@ -1,4 +1,4 @@
-def generate_video_trace(filename="frame_trace_0.txt", fps=30, duration=100, frame_size=45000):
+def generate_video_trace(filename="frame_trace_0.txt", fps=30, duration=100, frame_size=8000):
     """
     生成视频trace文件
     
@@ -6,7 +6,7 @@ def generate_video_trace(filename="frame_trace_0.txt", fps=30, duration=100, fra
     filename: 输出文件名
     fps: 帧率 (默认30)
     duration: 视频时长(秒) (默认100)
-    frame_size: 每帧大小(字节) (默认45000)
+    frame_size: 每帧大小(字节) (默认7500)
     """
     
     total_frames = fps * duration  # 总帧数
@@ -100,7 +100,7 @@ def verify_trace_file(filename="frame_trace_0.txt", sample_lines=5):
 
 
 # 如果希望第一个时间戳从0.033333开始，可以使用这个版本
-def generate_video_trace_offset(filename="frame_trace_0.txt", fps=30, duration=100, frame_size=45000, start_time=0.03333333333):
+def generate_video_trace_offset(filename="frame_trace_0.txt", fps=30, duration=100, frame_size=8000, start_time=0.03333333333):
     """
     生成视频trace文件（带起始时间偏移）
     
