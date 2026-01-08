@@ -912,3 +912,5 @@ int main(int argc, char *argv[]) {
 
 // 重定向输出到webrtc_ns3.log文件
 // ./waf --run "scratch/webrtc-FMN-TFMN(QoE) --oscc --dir /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/ --all --video_trace /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/video_trace/AsianCup_China_Uzbekistan/frame_trace_0" > webrtc_ns3.log 2>&1
+
+//./waf --run "scratch/webrtc-FMN-TFMN(QoE) --oscc --dir /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/ --all " > webrtc_ns3.log 2>&1

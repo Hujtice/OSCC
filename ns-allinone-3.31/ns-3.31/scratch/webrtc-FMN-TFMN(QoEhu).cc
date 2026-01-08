@@ -305,7 +305,7 @@ public:
 // 修改：使用固定loss_rate参数，因为实际loss值从trace中读取
 void RunSingleTraceSimulation(const std::string& trace_file, int index, int total, 
                              double bandwidth_scale_factor = 1.0, double loss_rate = 0.01,
-                             const std::string& video_trace_file = "") {
+                             const std::string& video_trace_file = "", bool oscc_mode = false) {
     std::string instance_name = ExtractInstanceName(trace_file);
     char current_dir[PATH_MAX];
     if (getcwd(current_dir, sizeof(current_dir)) == NULL) {
@@ -318,7 +318,12 @@ void RunSingleTraceSimulation(const std::string& trace_file, int index, int tota
     std::cout << "  Trace file: " << trace_file << std::endl;
     std::cout << "  Video trace file: " << (video_trace_file.empty() ? "none" : video_trace_file) << std::endl;
     std::cout << "  Progress: " << (index + 1) << "/" << total << std::endl;
-    std::cout << "  Bandwidth scale factor (μ): " << bandwidth_scale_factor << std::endl;
+    std::cout << "  OSCC mode: " << (oscc_mode ? "ENABLED" : "disabled") << std::endl;
+    if (oscc_mode) {
+        std::cout << "  Initial μ: " << bandwidth_scale_factor << " (will be dynamically adjusted)" << std::endl;
+    } else {
+        std::cout << "  Bandwidth scale factor (μ): " << bandwidth_scale_factor << std::endl;
+    }
     std::cout << "  Loss rate parameter (for RL manager): " << loss_rate << " (注: 实际loss值从trace文件读取)" << std::endl;
     std::cout << "==================================================" << std::endl;
     
@@ -336,9 +341,9 @@ void RunSingleTraceSimulation(const std::string& trace_file, int index, int tota
         std::cerr << "Warning: Failed to create directory: " << csv_output_dir << std::endl;
     }
     
-    // 构建命令行 - 包含视频trace参数
+    // 构建命令行 - 使用 webrtc-TFMN(QoE) 程序
     // 注意：loss_rate参数仍然传递给程序，但代码会从trace文件中读取实际的loss值
-    std::string command = "./waf --run \"scratch/webrtc-TFMN(RTT) --m=simu --topo=change --it=" + 
+    std::string command = "./waf --run \"scratch/webrtc-TFMN(QoEhu) --m=simu --topo=change --it=" + 
                          instance_name + " --trace=" + trace_file + 
                          " --mb=5 --ls=" + std::to_string(loss_rate) + " --mu=" + std::to_string(bandwidth_scale_factor);
     
@@ -346,6 +351,12 @@ void RunSingleTraceSimulation(const std::string& trace_file, int index, int tota
     if (!video_trace_file.empty()) {
         command += " --video_trace=" + video_trace_file;
     }
+    
+    // 如果启用OSCC模式，添加 --oscc 参数
+    if (oscc_mode) {
+        command += " --oscc=true";
+    }
+    
     command += "\"";
     
     std::cout << "=== EXECUTING COMMAND ===" << std::endl;
@@ -579,7 +590,15 @@ void ShowUsage(const std::string& program_name) {
     std::cout << "  --single <file>      Process a single trace file" << std::endl;
     std::cout << "  --analyze <file>     Analyze existing RL log file" << std::endl;
     std::cout << "  --custom             Use custom parameter set (仅带宽缩放)" << std::endl;
+    std::cout << "  --oscc               Enable OSCC mode (dynamic adaptive μ adjustment)" << std::endl;
     std::cout << "  --help               Show this help message" << std::endl;
+    std::cout << std::endl;
+    std::cout << "OSCC模式说明:" << std::endl;
+    std::cout << "  - 启用HAFA启发式算法进行动态μ调整" << std::endl;
+    std::cout << "  - 帧内调整：根据同一Rt组的丢包率对比" << std::endl;
+    std::cout << "  - 帧间调整：根据整帧QoE对比" << std::endl;
+    std::cout << "  - 参数: epsilon=0.02, mu_range=[0.5, 1.5]" << std::endl;
+    std::cout << "  - 初始μ=1.0，后续动态调整" << std::endl;
     std::cout << std::endl;
     std::cout << "重要更新:" << std::endl;
     std::cout << "  - Loss值现在从trace文件读取，不再需要批处理不同loss率" << std::endl;
@@ -597,6 +616,7 @@ int main(int argc, char *argv[]) {
     bool use_custom_params = false;
     std::vector<double> bandwidth_scale_factors = {1.0};
     double fixed_loss_rate = 0.01;  // 固定loss_rate参数，实际loss从trace文件读取
+    bool oscc_mode = false;  // OSCC模式：启用动态μ调整
     
     // 解析命令行参数
     for (int i = 1; i < argc; i++) {
@@ -605,6 +625,9 @@ int main(int argc, char *argv[]) {
             trace_directory = argv[++i];
         } else if (arg == "--video_trace" && i + 1 < argc) {  // 新增参数
             video_trace_file = argv[++i];
+        } else if (arg == "--oscc") {  // OSCC模式
+            oscc_mode = true;
+            // bandwidth_scale_factors = {1.0};  // OSCC模式下，初始μ=1.0，后续动态调整
         } else if (arg == "--ext" && i + 1 < argc) {
             std::string ext_list = argv[++i];
             extensions.clear();
@@ -669,9 +692,19 @@ int main(int argc, char *argv[]) {
     
     std::cout << "================================================" << std::endl;
     std::cout << "WEBRTC TRACE BATCH PROCESSOR WITH VIDEO TRACE ANALYSIS" << std::endl;
-    std::cout << "BANDWIDTH SCALING AND RL STATE MANAGEMENT" << std::endl;
+    if (oscc_mode) {
+        std::cout << "OSCC MODE: DYNAMIC ADAPTIVE MU ADJUSTMENT" << std::endl;
+    } else {
+        std::cout << "BANDWIDTH SCALING AND RL STATE MANAGEMENT" << std::endl;
+    }
     std::cout << "================================================" << std::endl;
-    std::cout << "重要更新: Loss值从trace文件读取，仅进行带宽缩放测试" << std::endl;
+    if (oscc_mode) {
+        std::cout << "重要: 启用OSCC动态μ调整算法（HAFA启发式）" << std::endl;
+        std::cout << "      μ值将根据帧内/帧间反馈自动调整" << std::endl;
+        std::cout << "      参数: epsilon=0.02, mu_range=[0.5, 1.5]" << std::endl;
+    } else {
+        std::cout << "重要更新: Loss值从trace文件读取，仅进行带宽缩放测试" << std::endl;
+    }
     std::cout << "================================================" << std::endl;
     
     if (!single_trace_file.empty()) {
@@ -695,7 +728,9 @@ int main(int argc, char *argv[]) {
     
     std::cout << "Fixed loss rate parameter: " << fixed_loss_rate << " (实际loss值从trace文件读取)" << std::endl;
     
-    if (use_custom_params) {
+    if (oscc_mode) {
+        std::cout << "OSCC MODE: ENABLED (Dynamic adaptive μ adjustment)" << std::endl;
+    } else if (use_custom_params) {
         std::cout << "CUSTOM PARAMETER SET ACTIVATED (仅带宽缩放)" << std::endl;
     }
     
@@ -729,8 +764,47 @@ int main(int argc, char *argv[]) {
         return -1;
     }
     
-    // 使用自定义批量处理函数，传递视频trace文件参数
-    if (use_custom_params) {
+    // OSCC模式：只运行一次，μ值动态调整
+    if (oscc_mode) {
+        std::cout << "=== OSCC MODE: Running with dynamic μ adjustment ===" << std::endl;
+        std::cout << "Initial μ: 1.0 (will be dynamically adjusted during simulation)" << std::endl;
+        std::cout << "Total trace files to process: " << trace_files.size() << std::endl;
+        
+        int successful_runs = 0;
+        int failed_runs = 0;
+        
+        for (size_t file_index = 0; file_index < trace_files.size(); ++file_index) {
+            const std::string& trace_file = trace_files[file_index];
+            
+            std::cout << "\n*** OSCC Processing file " << (file_index + 1) << "/" << trace_files.size() << " ***" << std::endl;
+            
+            try {
+                // OSCC模式：初始μ=1.0，通过oscc_mode=true启用动态调整
+                RunSingleTraceSimulation(trace_file, file_index, trace_files.size(), 
+                                       1.0, fixed_loss_rate, video_trace_file, true);  // oscc_mode=true
+                successful_runs++;
+                
+                if (file_index < trace_files.size() - 1) {
+                    std::cout << "Waiting 2 seconds before next file..." << std::endl;
+                    sleep(2);
+                }
+                
+            } catch (const std::exception& e) {
+                std::cerr << "Exception while processing " << trace_file << ": " << e.what() << std::endl;
+                failed_runs++;
+            } catch (...) {
+                std::cerr << "Unknown exception while processing " << trace_file << std::endl;
+                failed_runs++;
+            }
+        }
+        
+        std::cout << "\n=== OSCC BATCH PROCESSING COMPLETED ===" << std::endl;
+        std::cout << "Successful: " << successful_runs << "/" << trace_files.size() << std::endl;
+        std::cout << "Failed: " << failed_runs << "/" << trace_files.size() << std::endl;
+        std::cout << "==========================================" << std::endl;
+        
+    } else if (use_custom_params) {
+        // 使用自定义批量处理函数，传递视频trace文件参数
         RunCustomBatchProcessing(trace_files, video_trace_file);
     } else {
         // 修改：仅进行带宽缩放批处理
@@ -752,7 +826,7 @@ int main(int argc, char *argv[]) {
                 // 单个参数运行
                 try {
                     RunSingleTraceSimulation(trace_file, file_index, trace_files.size(), 
-                                           bandwidth_scale_factors[0], fixed_loss_rate, video_trace_file);
+                                           bandwidth_scale_factors[0], fixed_loss_rate, video_trace_file, false);  // oscc_mode=false
                     successful_runs++;
                     completed_simulations++;
                     
@@ -828,4 +902,15 @@ int main(int argc, char *argv[]) {
 
 
 // ./waf --run "scratch/webrtc-FmR-M --dir /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans --all --custom"
-// ./waf --run "scratch/webrtc-FMN-TFMN(RTT) --dir /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/ --video_trace /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/video_trace/AsianCup_China_Uzbekistan/frame_trace_0 --all --custom"
+// ./waf --run "scratch/webrtc-FMN-TFMN(QoE) --oscc --single --dir /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/ --video_trace /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/video_trace/AsianCup_China_Uzbekistan/frame_trace_0 --all --custom"
+
+// 处理单个trace文件
+//./waf --run "scratch/webrtc-FMN-TFMN(QoE) --oscc --single /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/AItrans_0.log --video_trace /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/video_trace/AsianCup_China_Uzbekistan/frame_trace_0
+
+// 处理目录下所有文件
+// ./waf --run "scratch/webrtc-FMN-TFMN(QoE) --oscc --dir /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/ --all --video_trace /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/video_trace/AsianCup_China_Uzbekistan/frame_trace_0"
+
+// 重定向输出到webrtc_ns3.log文件
+// ./waf --run "scratch/webrtc-FMN-TFMN(QoE) --oscc --dir /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/ --all --video_trace /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/video_trace/AsianCup_China_Uzbekistan/frame_trace_0" > webrtc_ns3.log 2>&1
+
+//./waf --run "scratch/webrtc-FMN-TFMN(QoE) --oscc --dir /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/ --all " > webrtc_ns3.log 2>&1

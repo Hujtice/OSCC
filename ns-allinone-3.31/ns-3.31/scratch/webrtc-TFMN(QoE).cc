@@ -51,154 +51,154 @@ uint64_t get_os_millis()
 }
 
 // 视频帧数据结构（遗留代码，FramePlayoutManager使用新的帧追踪机制）
-struct VideoFrame {
-    uint32_t frame_id;                    // 帧ID
-    Time deadline;                        // 播放截止时间
-    uint32_t frame_size;                  // 帧大小（字节）
-    uint32_t frame_type;                  // 帧类型：1=关键帧，0=P帧（遗留字段）
-    uint32_t total_packets;               // 总包数
-    uint32_t packets_received;            // 已接收包数
-    Time first_packet_arrival_time;       // 第一个包到达时间
-    Time last_packet_arrival_time;        // 最后一个包到达时间
-    uint32_t packets_before_deadline;     // 截止时间前到达的包数
-    uint32_t missed_deadline;             // 是否错过截止时间 (0/1)
-    Time stall_duration;                  // 卡顿时间
-    std::vector<Time> packet_arrival_times; // 每个包的到达时间
-    bool frame_completed;                 // 帧是否完成
-    std::vector<bool> packet_received;    // 每个包是否已接收
+// struct VideoFrame {
+//     uint32_t frame_id;                    // 帧ID
+//     Time deadline;                        // 播放截止时间
+//     uint32_t frame_size;                  // 帧大小（字节）
+//     uint32_t frame_type;                  // 帧类型：1=关键帧，0=P帧（遗留字段）
+//     uint32_t total_packets;               // 总包数
+//     uint32_t packets_received;            // 已接收包数
+//     Time first_packet_arrival_time;       // 第一个包到达时间
+//     Time last_packet_arrival_time;        // 最后一个包到达时间
+//     uint32_t packets_before_deadline;     // 截止时间前到达的包数
+//     uint32_t missed_deadline;             // 是否错过截止时间 (0/1)
+//     Time stall_duration;                  // 卡顿时间
+//     std::vector<Time> packet_arrival_times; // 每个包的到达时间
+//     bool frame_completed;                 // 帧是否完成
+//     std::vector<bool> packet_received;    // 每个包是否已接收
     
-    // 默认构造函数
-    VideoFrame() 
-        : frame_id(0), deadline(Seconds(0)), frame_size(0), frame_type(0),
-          total_packets(0), packets_received(0), first_packet_arrival_time(Seconds(0)),
-          last_packet_arrival_time(Seconds(0)), packets_before_deadline(0), 
-          missed_deadline(0), stall_duration(Seconds(0)), frame_completed(false) {}
+//     // 默认构造函数
+//     VideoFrame() 
+//         : frame_id(0), deadline(Seconds(0)), frame_size(0), frame_type(0),
+//           total_packets(0), packets_received(0), first_packet_arrival_time(Seconds(0)),
+//           last_packet_arrival_time(Seconds(0)), packets_before_deadline(0), 
+//           missed_deadline(0), stall_duration(Seconds(0)), frame_completed(false) {}
     
-    // 参数化构造函数
-    VideoFrame(uint32_t id, Time dl, uint32_t size, uint32_t type) 
-        : frame_id(id), deadline(dl), frame_size(size), frame_type(type),
-          total_packets(0), packets_received(0), first_packet_arrival_time(Seconds(0)),
-          last_packet_arrival_time(Seconds(0)), packets_before_deadline(0), 
-          missed_deadline(0), stall_duration(Seconds(0)), frame_completed(false) {
+//     // 参数化构造函数
+//     VideoFrame(uint32_t id, Time dl, uint32_t size, uint32_t type) 
+//         : frame_id(id), deadline(dl), frame_size(size), frame_type(type),
+//           total_packets(0), packets_received(0), first_packet_arrival_time(Seconds(0)),
+//           last_packet_arrival_time(Seconds(0)), packets_before_deadline(0), 
+//           missed_deadline(0), stall_duration(Seconds(0)), frame_completed(false) {
         
-        // 计算需要的包数（每个包DEFAULT_PACKET_SIZE字节）
-        total_packets = (frame_size + DEFAULT_PACKET_SIZE - 1) / DEFAULT_PACKET_SIZE;
-        packet_received.resize(total_packets, false);
-        packet_arrival_times.resize(total_packets, Seconds(0));
+//         // 计算需要的包数（每个包DEFAULT_PACKET_SIZE字节）
+//         total_packets = (frame_size + DEFAULT_PACKET_SIZE - 1) / DEFAULT_PACKET_SIZE;
+//         packet_received.resize(total_packets, false);
+//         packet_arrival_times.resize(total_packets, Seconds(0));
         
-        NS_LOG_DEBUG("Created frame " << frame_id << " with " << total_packets 
-                     << " packets, deadline: " << deadline.GetSeconds() << "s");
-    }
-};
+//         NS_LOG_DEBUG("Created frame " << frame_id << " with " << total_packets 
+//                      << " packets, deadline: " << deadline.GetSeconds() << "s");
+//     }
+// };
 
-// 视频trace管理器
-class VideoTraceManager {
-public:
-    VideoTraceManager() : frames_loaded(false) {}
+// // 视频trace管理器
+// class VideoTraceManager {
+// public:
+//     VideoTraceManager() : frames_loaded(false) {}
     
-    // 从文件加载视频trace
-    bool LoadVideoTrace(const std::string& trace_file) {
-        std::ifstream file(trace_file);
-        if (!file.is_open()) {
-            NS_LOG_ERROR("Cannot open video trace file: " << trace_file);
-            return false;
-        }
+//     // 从文件加载视频trace
+//     bool LoadVideoTrace(const std::string& trace_file) {
+//         std::ifstream file(trace_file);
+//         if (!file.is_open()) {
+//             NS_LOG_ERROR("Cannot open video trace file: " << trace_file);
+//             return false;
+//         }
         
-        // frames.clear();
+//         // frames.clear();
 
-        // uint32_t frame_id = 0;
+//         // uint32_t frame_id = 0;
         
-        // for(int i=0;i<std::stoi(frame_video_time);i++){
-        //     for(int j=0;j<std::stoi(frame_rate);j++){
-        //         Time deadline = Seconds(simulator::Now().GetSeconds()+1/frame_rate)+ Seconds(std::stoi(frame_play_dealy));
-        //         if(frame_id%10==0){
-        //             uint32_t frame_size=std::stoi(frame_definition)*3;
-        //             VideoFrame frame(frame_id, deadline, frame_size, 1);
-        //             frames.push_back(frame);
-        //         }
-        //         else{
-        //             uint32_t frame_size=std::stoi(frame_definition)*3/std::stoi(key_frame_size_factor);
-        //             VideoFrame frame(frame_id, deadline, frame_size, 0);
-        //             frames.push_back(frame);
+//         // for(int i=0;i<std::stoi(frame_video_time);i++){
+//         //     for(int j=0;j<std::stoi(frame_rate);j++){
+//         //         Time deadline = Seconds(simulator::Now().GetSeconds()+1/frame_rate)+ Seconds(std::stoi(frame_play_dealy));
+//         //         if(frame_id%10==0){
+//         //             uint32_t frame_size=std::stoi(frame_definition)*3;
+//         //             VideoFrame frame(frame_id, deadline, frame_size, 1);
+//         //             frames.push_back(frame);
+//         //         }
+//         //         else{
+//         //             uint32_t frame_size=std::stoi(frame_definition)*3/std::stoi(key_frame_size_factor);
+//         //             VideoFrame frame(frame_id, deadline, frame_size, 0);
+//         //             frames.push_back(frame);
                     
-        //         }
-        //         simulator::Simulator::Schedule(Seconds(simulator::Now().GetSeconds()+1/frame_rate), &VideoFrame::SendFrame, frame);
-        //         frame_id++;
-        //     }
-        // }
+//         //         }
+//         //         simulator::Simulator::Schedule(Seconds(simulator::Now().GetSeconds()+1/frame_rate), &VideoFrame::SendFrame, frame);
+//         //         frame_id++;
+//         //     }
+//         // }
 
-        // NS_LOG_INFO("Loaded " << frames.size() << " frames from " << trace_file);
+//         // NS_LOG_INFO("Loaded " << frames.size() << " frames from " << trace_file);
         
-        // // 输出前几帧信息用于调试
-        // for (size_t i = 0; i < std::min(frames.size(), size_t(5)); i++) {
-        //     const VideoFrame& frame = frames[i];
-        //     NS_LOG_INFO("Frame " << frame.frame_id << ": deadline=" << frame.deadline.GetSeconds() 
-        //                << "s, size=" << frame.frame_size << " bytes, type=" << frame.frame_type
-        //                << ", packets=" << frame.total_packets);
-        // }
+//         // // 输出前几帧信息用于调试
+//         // for (size_t i = 0; i < std::min(frames.size(), size_t(5)); i++) {
+//         //     const VideoFrame& frame = frames[i];
+//         //     NS_LOG_INFO("Frame " << frame.frame_id << ": deadline=" << frame.deadline.GetSeconds() 
+//         //                << "s, size=" << frame.frame_size << " bytes, type=" << frame.frame_type
+//         //                << ", packets=" << frame.total_packets);
+//         // }
         
-        return true;
-    }
+//         return true;
+//     }
     
-    // 获取指定帧的信息
-    const VideoFrame* GetFrame(uint32_t frame_id) const {
-        if (frame_id < frames.size()) {
-            return &frames[frame_id];
-        }
-        return nullptr;
-    }
+//     // 获取指定帧的信息
+//     const VideoFrame* GetFrame(uint32_t frame_id) const {
+//         if (frame_id < frames.size()) {
+//             return &frames[frame_id];
+//         }
+//         return nullptr;
+//     }
     
-    // 获取总帧数
-    size_t GetTotalFrames() const {
-        return frames.size();
-    }
+//     // 获取总帧数
+//     size_t GetTotalFrames() const {
+//         return frames.size();
+//     }
     
-    // 检查trace是否已加载
-    bool IsLoaded() const {
-        return frames_loaded;
-    }
+//     // 检查trace是否已加载
+//     bool IsLoaded() const {
+//         return frames_loaded;
+//     }
     
-    // 获取最后一帧的截止时间（用于确定仿真时长）
-    Time GetLastFrameDeadline() const {
-        if (frames.empty()) {
-            return Seconds(0);
-        }
-        return frames.back().deadline;
-    }
+//     // 获取最后一帧的截止时间（用于确定仿真时长）
+//     Time GetLastFrameDeadline() const {
+//         if (frames.empty()) {
+//             return Seconds(0);
+//         }
+//         return frames.back().deadline;
+//     }
     
-    // ============ 跳帧机制支持方法 ============
+//     // ============ 跳帧机制支持方法 ============
     
-    // 查找指定帧之后的下一个关键帧
-    // 返回关键帧ID，如果未找到返回 UINT32_MAX
-    uint32_t FindNextKeyFrame(uint32_t current_frame_id) const {
-        for (size_t i = current_frame_id + 1; i < frames.size(); i++) {
-            if (frames[i].frame_type == 1) {  // frame_type == 1 表示关键帧(I帧)
-                NS_LOG_INFO("[SkipFrame] Found next key frame: " << i 
-                           << " (current=" << current_frame_id << ")");
-                return static_cast<uint32_t>(i);
-            }
-        }
-        NS_LOG_WARN("[SkipFrame] No key frame found after frame " << current_frame_id);
-        return UINT32_MAX;  // 未找到关键帧
-    }
+//     // 查找指定帧之后的下一个关键帧
+//     // 返回关键帧ID，如果未找到返回 UINT32_MAX
+//     uint32_t FindNextKeyFrame(uint32_t current_frame_id) const {
+//         for (size_t i = current_frame_id + 1; i < frames.size(); i++) {
+//             if (frames[i].frame_type == 1) {  // frame_type == 1 表示关键帧(I帧)
+//                 NS_LOG_INFO("[SkipFrame] Found next key frame: " << i 
+//                            << " (current=" << current_frame_id << ")");
+//                 return static_cast<uint32_t>(i);
+//             }
+//         }
+//         NS_LOG_WARN("[SkipFrame] No key frame found after frame " << current_frame_id);
+//         return UINT32_MAX;  // 未找到关键帧
+//     }
     
-    // 获取所有帧的引用（供FrameManager使用）
-    const std::vector<VideoFrame>& GetAllFrames() const {
-        return frames;
-    }
+//     // 获取所有帧的引用（供FrameManager使用）
+//     const std::vector<VideoFrame>& GetAllFrames() const {
+//         return frames;
+//     }
     
-    // 获取指定帧的类型 (1=关键帧, 0=P帧)
-    uint32_t GetFrameType(uint32_t frame_id) const {
-        if (frame_id < frames.size()) {
-            return frames[frame_id].frame_type;
-        }
-        return 0;
-    }
+//     // 获取指定帧的类型 (1=关键帧, 0=P帧)
+//     uint32_t GetFrameType(uint32_t frame_id) const {
+//         if (frame_id < frames.size()) {
+//             return frames[frame_id].frame_type;
+//         }
+//         return 0;
+//     }
     
-private:
-    std::vector<VideoFrame> frames;
-    bool frames_loaded;
-};
+// private:
+//     std::vector<VideoFrame> frames;
+//     bool frames_loaded;
+// };
 
 // 包级别的状态记录
 struct PacketStateRecord {
@@ -1736,18 +1736,18 @@ public:
               skipped(false) {}
               
         // 从VideoFrame初始化
-        FrameStatistics(const VideoFrame& video_frame)
-            : frame_id(video_frame.frame_id), deadline(video_frame.deadline),
-              frame_size(video_frame.frame_size), frame_type(video_frame.frame_type),
-              total_packets(video_frame.total_packets), packets_received(0),
-              first_packet_arrival_time(Seconds(0)), last_packet_arrival_time(Seconds(0)),
-              packets_before_deadline(0), missed_deadline(0), stall_duration(Seconds(0)),
-              frame_completed(false), skipped(false) {
+        // FrameStatistics(const VideoFrame& video_frame)
+        //     : frame_id(video_frame.frame_id), deadline(video_frame.deadline),
+        //       frame_size(video_frame.frame_size), frame_type(video_frame.frame_type),
+        //       total_packets(video_frame.total_packets), packets_received(0),
+        //       first_packet_arrival_time(Seconds(0)), last_packet_arrival_time(Seconds(0)),
+        //       packets_before_deadline(0), missed_deadline(0), stall_duration(Seconds(0)),
+        //       frame_completed(false), skipped(false) {
             
-            packet_arrival_times.resize(total_packets, Seconds(0));
-            packet_received.resize(total_packets, false);
-            packet_delays.reserve(total_packets);  // ✅ 预分配空间
-        }
+        //     packet_arrival_times.resize(total_packets, Seconds(0));
+        //     packet_received.resize(total_packets, false);
+        //     packet_delays.reserve(total_packets);  // ✅ 预分配空间
+        // }
     };
 
     struct FrameQoEResult {
@@ -1767,7 +1767,8 @@ public:
                           qoe_delay(0.0), qoe_loss(0.0), qoe_ddl(0.0) {}
     };
 
-    FrameManager(VideoTraceManager* trace_manager = nullptr, RLStateManager* rl_manager = nullptr) 
+    // FrameManager(VideoTraceManager* trace_manager = nullptr, RLStateManager* rl_manager = nullptr) 
+    FrameManager(RLStateManager* rl_manager = nullptr) 
         : current_trace_bandwidth_(0.0),
           current_gcc_bandwidth_(0.0),
           current_scaled_bandwidth_(0.0),
@@ -1775,15 +1776,15 @@ public:
           current_frame_id(0), 
           last_frame_complete_time(Seconds(0)), 
           packet_counter(0), 
-          trace_manager(trace_manager), 
+        //   trace_manager(trace_manager), 
           rl_manager_(rl_manager) {
         
-        if (trace_manager && trace_manager->IsLoaded()) {
-            NS_LOG_INFO("FrameManager initialized with video trace, total frames: " 
-                       << trace_manager->GetTotalFrames());
-        } else {
-            NS_LOG_WARN("FrameManager initialized without video trace!");
-        }
+        // if (trace_manager && trace_manager->IsLoaded()) {
+        //     NS_LOG_INFO("FrameManager initialized with video trace, total frames: " 
+        //                << trace_manager->GetTotalFrames());
+        // } else {
+        //     NS_LOG_WARN("FrameManager initialized without video trace!");
+        // }
     }
     
     // 处理数据包到达 - 修改为使用真实发送时间
@@ -1796,10 +1797,10 @@ public:
         uint32_t frame_id = 0;
         uint32_t packet_index_in_frame = 0;
         
-        if (!FindFrameForPacket(packet_id, frame_id, packet_index_in_frame)) {
-            NS_LOG_DEBUG("Packet " << packet_id << " does not belong to any known frame");
-            return;
-        }
+        // if (!FindFrameForPacket(packet_id, frame_id, packet_index_in_frame)) {
+        //     NS_LOG_DEBUG("Packet " << packet_id << " does not belong to any known frame");
+        //     return;
+        // }
         
         NS_LOG_DEBUG("Processing packet " << packet_id << " for frame " << frame_id 
                      << " (index " << packet_index_in_frame << ") at time " 
@@ -1846,9 +1847,10 @@ public:
         }
         
         // ✅ 跳帧机制：当帧的第一个包到达时，调度DDL超时检查
-        if (is_first_packet && !frame.skipped) {
-            ScheduleDdlCheck(frame_id);
-        }
+        // 屎山跳帧代码
+        // if (is_first_packet && !frame.skipped) {
+        //     ScheduleDdlCheck(frame_id);
+        // }
         
         // 检查是否在截止时间前到达
         if (arrival_time <= frame.deadline) {
@@ -1876,7 +1878,7 @@ public:
                        << ", using estimated value: " << estimated_delay << "ms");
         }
         
-        NS_LOG_DEBUG("Frame " << frame_id << ": packets_received=" << frame.packets_received 
+        NS_LOG_INFO("Frame " << frame_id << ": packets_received=" << frame.packets_received 
                      << "/" << frame.total_packets << ", packets_before_deadline=" 
                      << frame.packets_before_deadline << ", delays_collected=" 
                      << frame.packet_delays.size());
@@ -2055,12 +2057,12 @@ public:
     }
     
     // 设置视频trace管理器
-    void SetVideoTraceManager(VideoTraceManager* manager) {
-        trace_manager = manager;
-        if (manager && manager->IsLoaded()) {
-            NS_LOG_INFO("Video trace manager set with " << manager->GetTotalFrames() << " frames");
-        }
-    }
+    // void SetVideoTraceManager(VideoTraceManager* manager) {
+    //     trace_manager = manager;
+    //     if (manager && manager->IsLoaded()) {
+    //         NS_LOG_INFO("Video trace manager set with " << manager->GetTotalFrames() << " frames");
+    //     }
+    // }
     
     // 新增：获取帧统计摘要
     void GetFrameStatsSummary(uint32_t& total_frames, uint32_t& missed_deadline_frames, 
@@ -2869,32 +2871,32 @@ private:
         std::cout << "  Loss from trace: " << trace_loss_rate << std::endl;
         std::cout << "========================================" << std::endl;
         
-        NS_LOG_DEBUG("Recorded REAL RL state for frame " << frame_id << " packet " << packet_index
+        NS_LOG_INFO("Recorded REAL RL state for frame " << frame_id << " packet " << packet_index
                    << " at time " << arrival_time.GetSeconds() << "s, delay=" << current_delay_ms 
                    << "ms, Rt=" << Rt << ", reward=" << reward);
     }
     
     // 查找包所属的帧
-    bool FindFrameForPacket(uint32_t packet_id, uint32_t& frame_id, uint32_t& packet_index_in_frame) {
-        if (!trace_manager || !trace_manager->IsLoaded()) {
-            return false;
-        }
+    // bool FindFrameForPacket(uint32_t packet_id, uint32_t& frame_id, uint32_t& packet_index_in_frame) {
+    //     if (!trace_manager || !trace_manager->IsLoaded()) {
+    //         return false;
+    //     }
         
-        uint32_t current_packet = 0;
-        for (uint32_t i = 0; i < trace_manager->GetTotalFrames(); i++) {
-            const VideoFrame* frame = trace_manager->GetFrame(i);
-            if (!frame) continue;
+    //     uint32_t current_packet = 0;
+    //     for (uint32_t i = 0; i < trace_manager->GetTotalFrames(); i++) {
+    //         const VideoFrame* frame = trace_manager->GetFrame(i);
+    //         if (!frame) continue;
             
-            if (packet_id >= current_packet && packet_id < current_packet + frame->total_packets) {
-                frame_id = i;
-                packet_index_in_frame = packet_id - current_packet;
-                return true;
-            }
-            current_packet += frame->total_packets;
-        }
+    //         if (packet_id >= current_packet && packet_id < current_packet + frame->total_packets) {
+    //             frame_id = i;
+    //             packet_index_in_frame = packet_id - current_packet;
+    //             return true;
+    //         }
+    //         current_packet += frame->total_packets;
+    //     }
         
-        return false;
-    }
+    //     return false;
+    // }
     
     // 获取或创建帧统计
     FrameStatistics& GetOrCreateFrameStatistics(uint32_t frame_id) {
@@ -2903,17 +2905,17 @@ private:
             return it->second;
         }
         
-        // 创建新的帧统计
-        if (trace_manager && trace_manager->IsLoaded()) {
-            const VideoFrame* video_frame = trace_manager->GetFrame(frame_id);
-            if (video_frame) {
-                FrameStatistics new_frame(*video_frame);
-                frames[frame_id] = new_frame;
-                NS_LOG_DEBUG("Created frame statistics for frame " << frame_id 
-                           << " with " << new_frame.total_packets << " packets");
-                return frames[frame_id];
-            }
-        }
+        // // 创建新的帧统计
+        // if (trace_manager && trace_manager->IsLoaded()) {
+        //     const VideoFrame* video_frame = trace_manager->GetFrame(frame_id);
+        //     if (video_frame) {
+        //         FrameStatistics new_frame(*video_frame);
+        //         frames[frame_id] = new_frame;
+        //         NS_LOG_DEBUG("Created frame statistics for frame " << frame_id 
+        //                    << " with " << new_frame.total_packets << " packets");
+        //         return frames[frame_id];
+        //     }
+        // }
         
         // 如果没有trace信息，创建默认帧统计
         FrameStatistics default_frame;
@@ -2943,110 +2945,112 @@ public:
     
     // 为帧调度DDL超时检查
     // 在帧的第一个包到达时调用此方法
-    void ScheduleDdlCheck(uint32_t frame_id) {
-        // 避免重复调度
-        if (ddl_check_scheduled_.find(frame_id) != ddl_check_scheduled_.end()) {
-            return;
-        }
+    // 屎山跳帧代码
+    // void ScheduleDdlCheck(uint32_t frame_id) {
+    //     // 避免重复调度
+    //     if (ddl_check_scheduled_.find(frame_id) != ddl_check_scheduled_.end()) {
+    //         return;
+    //     }
         
-        // 获取帧的DDL
-        auto it = frames.find(frame_id);
-        if (it == frames.end()) {
-            return;
-        }
+    //     // 获取帧的DDL
+    //     auto it = frames.find(frame_id);
+    //     if (it == frames.end()) {
+    //         return;
+    //     }
         
-        const FrameStatistics& frame = it->second;
-        Time now = Simulator::Now();
+    //     const FrameStatistics& frame = it->second;
+    //     Time now = Simulator::Now();
         
-        // 如果DDL已经过了，直接启动额外等待
-        if (now >= frame.deadline) {
-            // DDL已过，直接启动33ms等待
-            Simulator::Schedule(MilliSeconds(SKIP_FRAME_TIMEOUT_MS),
-                              &FrameManager::OnSkipFrameTimeout, this, frame_id);
-            std::cout << "[SkipFrame] Frame " << frame_id 
-                      << " DDL already passed, scheduling skip check in " 
-                      << SKIP_FRAME_TIMEOUT_MS << "ms" << std::endl;
-        } else {
-            // DDL未到，先调度DDL检查
-            Time delay_to_ddl = frame.deadline - now;
-            Simulator::Schedule(delay_to_ddl,
-                              &FrameManager::OnDdlTimeout, this, frame_id);
-            std::cout << "[SkipFrame] Frame " << frame_id 
-                      << " DDL check scheduled in " << delay_to_ddl.GetMilliSeconds() 
-                      << "ms (deadline=" << frame.deadline.GetSeconds() << "s)" << std::endl;
-        }
+    //     // 如果DDL已经过了，直接启动额外等待
+    //     if (now >= frame.deadline) {
+    //         // DDL已过，直接启动33ms等待
+    //         Simulator::Schedule(MilliSeconds(SKIP_FRAME_TIMEOUT_MS),
+    //                           &FrameManager::OnSkipFrameTimeout, this, frame_id);
+    //         std::cout << "[SkipFrame] Frame " << frame_id 
+    //                   << " DDL already passed, scheduling skip check in " 
+    //                   << SKIP_FRAME_TIMEOUT_MS << "ms" << std::endl;
+    //     } else {
+    //         // DDL未到，先调度DDL检查
+    //         Time delay_to_ddl = frame.deadline - now;
+    //         Simulator::Schedule(delay_to_ddl,
+    //                           &FrameManager::OnDdlTimeout, this, frame_id);
+    //         std::cout << "[SkipFrame] Frame " << frame_id 
+    //                   << " DDL check scheduled in " << delay_to_ddl.GetMilliSeconds() 
+    //                   << "ms (deadline=" << frame.deadline.GetSeconds() << "s)" << std::endl;
+    //     }
         
-        ddl_check_scheduled_.insert(frame_id);
-    }
+    //     ddl_check_scheduled_.insert(frame_id);
+    // }
     
     // DDL超时回调：检查帧是否完成，如果未完成则启动额外等待
-    void OnDdlTimeout(uint32_t frame_id) {
-        auto it = frames.find(frame_id);
-        if (it == frames.end()) {
-            NS_LOG_WARN("[SkipFrame] Frame " << frame_id << " not found in OnDdlTimeout");
-            return;
-        }
+    // void OnDdlTimeout(uint32_t frame_id) {
+    //     auto it = frames.find(frame_id);
+    //     if (it == frames.end()) {
+    //         NS_LOG_WARN("[SkipFrame] Frame " << frame_id << " not found in OnDdlTimeout");
+    //         return;
+    //     }
         
-        FrameStatistics& frame = it->second;
+    //     FrameStatistics& frame = it->second;
         
-        // 如果帧已完成或已被跳过，不需要处理
-        if (frame.frame_completed || frame.skipped) {
-            std::cout << "[SkipFrame] Frame " << frame_id 
-                      << " already " << (frame.frame_completed ? "completed" : "skipped")
-                      << " at DDL check" << std::endl;
-            return;
-        }
+    //     // 如果帧已完成或已被跳过，不需要处理
+    //     if (frame.frame_completed || frame.skipped) {
+    //         std::cout << "[SkipFrame] Frame " << frame_id 
+    //                   << " already " << (frame.frame_completed ? "completed" : "skipped")
+    //                   << " at DDL check" << std::endl;
+    //         return;
+    //     }
         
-        // 帧未完成，启动33ms额外等待
-        std::cout << "[SkipFrame] Frame " << frame_id 
-                  << " not complete at DDL, starting " << SKIP_FRAME_TIMEOUT_MS 
-                  << "ms grace period (received " << frame.packets_received 
-                  << "/" << frame.total_packets << " packets)" << std::endl;
+    //     // 帧未完成，启动33ms额外等待
+    //     std::cout << "[SkipFrame] Frame " << frame_id 
+    //               << " not complete at DDL, starting " << SKIP_FRAME_TIMEOUT_MS 
+    //               << "ms grace period (received " << frame.packets_received 
+    //               << "/" << frame.total_packets << " packets)" << std::endl;
         
-        Simulator::Schedule(MilliSeconds(SKIP_FRAME_TIMEOUT_MS),
-                          &FrameManager::OnSkipFrameTimeout, this, frame_id);
-    }
+    //     Simulator::Schedule(MilliSeconds(SKIP_FRAME_TIMEOUT_MS),
+    //                       &FrameManager::OnSkipFrameTimeout, this, frame_id);
+    // }
     
     // 33ms额外等待超时：决定是否跳帧
-    void OnSkipFrameTimeout(uint32_t frame_id) {
-        auto it = frames.find(frame_id);
-        if (it == frames.end()) {
-            NS_LOG_WARN("[SkipFrame] Frame " << frame_id << " not found in OnSkipFrameTimeout");
-            return;
-        }
+    // 屎山，大概率用不上
+    // void OnSkipFrameTimeout(uint32_t frame_id) {
+    //     auto it = frames.find(frame_id);
+    //     if (it == frames.end()) {
+    //         NS_LOG_WARN("[SkipFrame] Frame " << frame_id << " not found in OnSkipFrameTimeout");
+    //         return;
+    //     }
         
-        FrameStatistics& frame = it->second;
+    //     FrameStatistics& frame = it->second;
         
-        // 如果帧已完成或已被跳过，不需要处理
-        if (frame.frame_completed || frame.skipped) {
-            std::cout << "[SkipFrame] Frame " << frame_id 
-                      << " already " << (frame.frame_completed ? "completed" : "skipped")
-                      << " after grace period" << std::endl;
-            return;
-        }
+    //     // 如果帧已完成或已被跳过，不需要处理
+    //     if (frame.frame_completed || frame.skipped) {
+    //         std::cout << "[SkipFrame] Frame " << frame_id 
+    //                   << " already " << (frame.frame_completed ? "completed" : "skipped")
+    //                   << " after grace period" << std::endl;
+    //         return;
+    //     }
         
-        // 帧仍未完成，需要跳帧
-        std::cout << "[SkipFrame] Frame " << frame_id 
-                  << " TIMEOUT after DDL+" << SKIP_FRAME_TIMEOUT_MS 
-                  << "ms! (received " << frame.packets_received 
-                  << "/" << frame.total_packets << " packets)" << std::endl;
+    //     // 帧仍未完成，需要跳帧
+    //     std::cout << "[SkipFrame] Frame " << frame_id 
+    //               << " TIMEOUT after DDL+" << SKIP_FRAME_TIMEOUT_MS 
+    //               << "ms! (received " << frame.packets_received 
+    //               << "/" << frame.total_packets << " packets)" << std::endl;
         
-        // 查找下一个关键帧
-        if (!trace_manager || !trace_manager->IsLoaded()) {
-            NS_LOG_ERROR("[SkipFrame] Cannot find next key frame: trace_manager not available");
-            return;
-        }
+    //     // 查找下一个关键帧
+    //     if (!trace_manager || !trace_manager->IsLoaded()) {
+    //         NS_LOG_ERROR("[SkipFrame] Cannot find next key frame: trace_manager not available");
+    //         return;
+    //     }
         
-        uint32_t next_key_frame = trace_manager->FindNextKeyFrame(frame_id);
-        if (next_key_frame == UINT32_MAX) {
-            std::cout << "[SkipFrame] No key frame found after frame " << frame_id 
-                      << ", cannot skip" << std::endl;
-            return;
-        }
+    //     uint32_t next_key_frame = trace_manager->FindNextKeyFrame(frame_id);
+    //     if (next_key_frame == UINT32_MAX) {
+    //         std::cout << "[SkipFrame] No key frame found after frame " << frame_id 
+    //                   << ", cannot skip" << std::endl;
+    //         return;
+    //     }
         
-        // 执行跳帧
-        SkipToKeyFrame(next_key_frame);
-    }
+    //     // 执行跳帧
+    //     SkipToKeyFrame(next_key_frame);
+    // }
     
     // 执行跳帧：标记中间帧为已跳过，通知发送端
     void SkipToKeyFrame(uint32_t target_key_frame_id) {
@@ -3136,7 +3140,7 @@ private:
     uint32_t current_frame_id;
     Time last_frame_complete_time;
     uint32_t packet_counter;
-    VideoTraceManager* trace_manager;
+    // VideoTraceManager* trace_manager;
     RLStateManager* rl_manager_;   // 新增：指向 RL 状态管理器
     
     // OSCC集成
@@ -3626,7 +3630,7 @@ static void InstallWebrtcApplication(Ptr<Node> sender,
                         double bandwidth_scale_factor = 1.0,
                         double loss_rate = 0.01,
                         BandwidthChanger* bandwidth_changer = nullptr,
-                        VideoTraceManager* video_trace_manager = nullptr,
+                        // VideoTraceManager* video_trace_manager = nullptr,
                         FramePlayoutManager* frame_playout_manager = nullptr)
 {
     std::cout << "\n[DEBUG] InstallWebrtcApplication called" << std::endl;
@@ -3782,11 +3786,11 @@ static void InstallWebrtcApplication(Ptr<Node> sender,
         std::cout << "[DEBUG] RLStateManager set in FrameAwareWebrtcTrace" << std::endl;
     }
     
-    // 设置视频trace管理器
-    if (frame_manager && video_trace_manager) {
-        frame_manager->SetVideoTraceManager(video_trace_manager);
-        NS_LOG_INFO("Video trace manager set in FrameManager");
-    }
+    // // 设置视频trace管理器
+    // if (frame_manager && video_trace_manager) {
+    //     frame_manager->SetVideoTraceManager(video_trace_manager);
+    //     NS_LOG_INFO("Video trace manager set in FrameManager");
+    // }
     
     // 设置应用程序时间
     sendApp->SetStartTime(start_app);
@@ -3913,17 +3917,17 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
     NS_ASSERT(startapptime == 0.0);
     
     // 创建视频trace管理器
-    std::unique_ptr<VideoTraceManager> video_trace_manager = nullptr;
-    if (!video_trace_file.empty()) {
-        video_trace_manager = std::make_unique<VideoTraceManager>();
-        if (video_trace_manager->LoadVideoTrace(video_trace_file)) {
-            std::cout << "Successfully loaded video trace with " << video_trace_manager->GetTotalFrames() 
-                      << " frames, last frame deadline: " << video_trace_manager->GetLastFrameDeadline().GetSeconds() << "s" << std::endl;
-        } else {
-            std::cerr << "Failed to load video trace file: " << video_trace_file << std::endl;
-            video_trace_manager.reset();
-        }
-    }
+    // std::unique_ptr<VideoTraceManager> video_trace_manager = nullptr;
+    // if (!video_trace_file.empty()) {
+    //     video_trace_manager = std::make_unique<VideoTraceManager>();
+    //     if (video_trace_manager->LoadVideoTrace(video_trace_file)) {
+    //         std::cout << "Successfully loaded video trace with " << video_trace_manager->GetTotalFrames() 
+    //                   << " frames, last frame deadline: " << video_trace_manager->GetLastFrameDeadline().GetSeconds() << "s" << std::endl;
+    //     } else {
+    //         std::cerr << "Failed to load video trace file: " << video_trace_file << std::endl;
+    //         video_trace_manager.reset();
+    //     }
+    // }
     
     uint64_t bps= max_bandwith * kBwUnit;
     uint32_t link_delay=20.0;
@@ -4012,12 +4016,12 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
     std::string prefix=instance + "_" + trace_base_name + webrtc_log_com;
     std::vector<FrameAwareWebrtcTrace*> trace_vec;
     
-    // 创建基于视频trace的帧管理器
-    std::vector<std::unique_ptr<FrameManager>> frame_managers;
-    for (int i=0;i<num;i++) {
-        frame_managers.push_back(std::make_unique<FrameManager>(video_trace_manager.get()));
-        std::cout << "Created FrameManager " << i+1 << " with video trace for WebRTC session" << std::endl;
-    }
+    // // 创建基于视频trace的帧管理器
+    // std::vector<std::unique_ptr<FrameManager>> frame_managers;
+    // for (int i=0;i<num;i++) {
+    //     frame_managers.push_back(std::make_unique<FrameManager>(video_trace_manager.get()));
+    //     std::cout << "Created FrameManager " << i+1 << " with video trace for WebRTC session" << std::endl;
+    // }
     
     // ============ 创建 FramePlayoutManager ============
     std::vector<std::unique_ptr<FramePlayoutManager>> frame_playout_managers;
@@ -4078,7 +4082,7 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
             
             // 关联到RLStateManager和FrameManager
             rl_managers[i]->SetOSCCController(oscc_controller.get());
-            frame_managers[i]->SetOSCCController(oscc_controller.get());
+            // frame_managers[i]->SetOSCCController(oscc_controller.get());
             
             std::cout << "=== OSCCController " << i+1 << " initialized ===" << std::endl;
             std::cout << "  epsilon: 0.02" << std::endl;
@@ -4126,7 +4130,7 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
                 sesssion_manager.at(i).get(), trace, 
                 frame_managers[i].get(), rl_managers[i].get(), 
                 bandwidth_scale_factor, loss_rate, changer,  // 直接传递原始指针
-                video_trace_manager.get(),
+                // video_trace_manager.get(),
                 frame_playout_managers[i].get());  // 传递 FramePlayoutManager
         
         sendPort++;
@@ -4144,13 +4148,13 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
 
     // 如果使用视频trace，调整仿真时长以匹配视频时长
     float simulation_stop_time = endapptime + 10.0;
-    if (video_trace_manager && video_trace_manager->IsLoaded()) {
-        Time video_duration = video_trace_manager->GetLastFrameDeadline();
-        if (video_duration > Seconds(simulation_stop_time)) {
-            simulation_stop_time = video_duration.GetSeconds() + 5.0;
-            std::cout << "Adjusted simulation duration to match video: " << simulation_stop_time << "s" << std::endl;
-        }
-    }
+    // if (video_trace_manager && video_trace_manager->IsLoaded()) {
+    //     Time video_duration = video_trace_manager->GetLastFrameDeadline();
+    //     if (video_duration > Seconds(simulation_stop_time)) {
+    //         simulation_stop_time = video_duration.GetSeconds() + 5.0;
+    //         std::cout << "Adjusted simulation duration to match video: " << simulation_stop_time << "s" << std::endl;
+    //     }
+    // }
     
     std::cout << "Simulator will stop at: " << simulation_stop_time << " seconds" << std::endl;
     

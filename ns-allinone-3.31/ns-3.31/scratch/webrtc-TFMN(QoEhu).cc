@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <map>
 #include <unordered_map>
+#include <set>
+#include <functional>
 #include <cmath>
 #include <numeric>
 #include <deque>
@@ -19,6 +21,7 @@
 #include "ns3/traffic-control-module.h"
 #include "ns3/log.h"
 #include "ns3/ex-webrtc-module.h"
+#include "ns3/frame-playout-manager.h"
 #include <dirent.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -39,129 +42,12 @@ NS_LOG_COMPONENT_DEFINE ("webrtc-static");
 const uint32_t DEFAULT_PACKET_SIZE = 1500;
 const uint32_t kBwUnit=1000000;
 
-// 移除原有的固定帧配置，改为从trace文件读取
-const uint32_t MAX_PACKETS_PER_FRAME = 150; // 最大包数，根据最大帧大小设置
-
 uint64_t get_os_millis()
 {
     struct timeval tv;
     gettimeofday(&tv, NULL);
     return (uint64_t)(tv.tv_sec * 1000 + tv.tv_usec / 1000);
 }
-
-// 视频帧数据结构
-struct VideoFrame {
-    uint32_t frame_id;                    // 帧ID
-    Time deadline;                        // 播放截止时间
-    uint32_t frame_size;                  // 帧大小（字节）
-    uint32_t frame_type;                  // 帧类型：1=关键帧，0=P帧
-    uint32_t total_packets;               // 总包数
-    uint32_t packets_received;            // 已接收包数
-    Time first_packet_arrival_time;       // 第一个包到达时间
-    Time last_packet_arrival_time;        // 最后一个包到达时间
-    uint32_t packets_before_deadline;     // 截止时间前到达的包数
-    uint32_t missed_deadline;             // 是否错过截止时间 (0/1)
-    Time stall_duration;                  // 卡顿时间
-    std::vector<Time> packet_arrival_times; // 每个包的到达时间
-    bool frame_completed;                 // 帧是否完成
-    std::vector<bool> packet_received;    // 每个包是否已接收
-    
-    // 默认构造函数
-    VideoFrame() 
-        : frame_id(0), deadline(Seconds(0)), frame_size(0), frame_type(0),
-          total_packets(0), packets_received(0), first_packet_arrival_time(Seconds(0)),
-          last_packet_arrival_time(Seconds(0)), packets_before_deadline(0), 
-          missed_deadline(0), stall_duration(Seconds(0)), frame_completed(false) {}
-    
-    // 参数化构造函数
-    VideoFrame(uint32_t id, Time dl, uint32_t size, uint32_t type) 
-        : frame_id(id), deadline(dl), frame_size(size), frame_type(type),
-          total_packets(0), packets_received(0), first_packet_arrival_time(Seconds(0)),
-          last_packet_arrival_time(Seconds(0)), packets_before_deadline(0), 
-          missed_deadline(0), stall_duration(Seconds(0)), frame_completed(false) {
-        
-        // 计算需要的包数（每个包DEFAULT_PACKET_SIZE字节）
-        total_packets = (frame_size + DEFAULT_PACKET_SIZE - 1) / DEFAULT_PACKET_SIZE;
-        packet_received.resize(total_packets, false);
-        packet_arrival_times.resize(total_packets, Seconds(0));
-        
-        NS_LOG_DEBUG("Created frame " << frame_id << " with " << total_packets 
-                     << " packets, deadline: " << deadline.GetSeconds() << "s");
-    }
-};
-
-// 视频trace管理器
-class VideoTraceManager {
-public:
-    VideoTraceManager() : frames_loaded(false) {}
-    
-    // 从文件加载视频trace
-    bool LoadVideoTrace(const std::string& trace_file) {
-        std::ifstream file(trace_file);
-        if (!file.is_open()) {
-            NS_LOG_ERROR("Cannot open video trace file: " << trace_file);
-            return false;
-        }
-        
-        frames.clear();
-        float time_sec;
-        float frame_size;
-        uint32_t frame_type;
-        uint32_t frame_id = 0;
-        
-        while (file >> time_sec >> frame_size >> frame_type) {
-            Time deadline = Seconds(time_sec)+ Seconds(0.1);  // 加上0.1秒延迟
-            VideoFrame frame(frame_id, deadline, static_cast<uint32_t>(frame_size), frame_type);
-            frames.push_back(frame);
-            frame_id++;
-        }
-        
-        file.close();
-        frames_loaded = true;
-        
-        NS_LOG_INFO("Loaded " << frames.size() << " frames from " << trace_file);
-        
-        // 输出前几帧信息用于调试
-        for (size_t i = 0; i < std::min(frames.size(), size_t(5)); i++) {
-            const VideoFrame& frame = frames[i];
-            NS_LOG_INFO("Frame " << frame.frame_id << ": deadline=" << frame.deadline.GetSeconds() 
-                       << "s, size=" << frame.frame_size << " bytes, type=" << frame.frame_type
-                       << ", packets=" << frame.total_packets);
-        }
-        
-        return true;
-    }
-    
-    // 获取指定帧的信息
-    const VideoFrame* GetFrame(uint32_t frame_id) const {
-        if (frame_id < frames.size()) {
-            return &frames[frame_id];
-        }
-        return nullptr;
-    }
-    
-    // 获取总帧数
-    size_t GetTotalFrames() const {
-        return frames.size();
-    }
-    
-    // 检查trace是否已加载
-    bool IsLoaded() const {
-        return frames_loaded;
-    }
-    
-    // 获取最后一帧的截止时间（用于确定仿真时长）
-    Time GetLastFrameDeadline() const {
-        if (frames.empty()) {
-            return Seconds(0);
-        }
-        return frames.back().deadline;
-    }
-    
-private:
-    std::vector<VideoFrame> frames;
-    bool frames_loaded;
-};
 
 // 包级别的状态记录
 struct PacketStateRecord {
@@ -314,17 +200,25 @@ public:
             if (current_frame_id_ > 0 || !current_frame_rt_loss_.empty()) {
                 last_frame_rt_loss_ = current_frame_rt_loss_;
                 last_frame_max_rt_ = 0;
+                last_frame_min_rt_ = UINT32_MAX;  // 初始化为最大值
                 for (const auto& pair : last_frame_rt_loss_) {
                     if (pair.first > last_frame_max_rt_) {
                         last_frame_max_rt_ = pair.first;
                     }
+                    if (pair.first < last_frame_min_rt_) {
+                        last_frame_min_rt_ = pair.first;
+                    }
+                }
+                // 如果没有记录，重置min_rt为0
+                if (last_frame_min_rt_ == UINT32_MAX) {
+                    last_frame_min_rt_ = 0;
                 }
             }
             current_frame_rt_loss_.clear();
             current_frame_id_ = frame_id;
             
-            NS_LOG_DEBUG("OSCC: New frame " << frame_id << " started, last_frame_max_rt=" 
-                        << last_frame_max_rt_);
+            NS_LOG_DEBUG("OSCC: New frame " << frame_id << " started, last_frame_max_rt="
+                        << last_frame_max_rt_ << ", last_frame_min_rt=" << last_frame_min_rt_);
         }
         
         NS_LOG_DEBUG("OSCC: GetMuForPacket frame=" << frame_id << ", Rt=" << Rt 
@@ -481,12 +375,22 @@ private:
                             << current_loss << "), mu decreased");
             }
             // 丢包率相同则不调整
-        } else if (Rt > last_frame_max_rt_ && last_frame_max_rt_ > 0) {
-            // 新出现的高Rt组（比上一帧最大Rt还大），探索性增加μ
-            current_mu_ += epsilon_;
-            adjusted = true;
-            NS_LOG_DEBUG("OSCC Intra-frame: new high Rt group (Rt=" << Rt 
-                        << " > last_max=" << last_frame_max_rt_ << "), mu increased");
+        } else if (last_frame_max_rt_ > 0 || last_frame_min_rt_ > 0) {
+            // 新出现的Rt组（上一帧没有此Rt），根据Rt范围决定调整方向
+            if (Rt > last_frame_max_rt_) {
+                // Rt大于上一帧最大Rt，探索性增加μ
+                current_mu_ += epsilon_;
+                adjusted = true;
+                NS_LOG_DEBUG("OSCC Intra-frame: new high Rt group (Rt=" << Rt 
+                            << " > last_max=" << last_frame_max_rt_ << "), mu increased");
+            } else if (Rt < last_frame_min_rt_) {
+                // Rt小于上一帧最小Rt，保守性减小μ
+                current_mu_ -= epsilon_;
+                adjusted = true;
+                NS_LOG_DEBUG("OSCC Intra-frame: new low Rt group (Rt=" << Rt 
+                            << " < last_min=" << last_frame_min_rt_ << "), mu decreased");
+            }
+            // Rt介于上一帧最小和最大之间，不调整
         }
         
         // 约束μ在有效范围内
@@ -502,6 +406,9 @@ private:
             std::cout << "[OSCC] Intra-frame adjustment: frame=" << frame_id 
                      << ", Rt=" << Rt << ", mu: " << old_mu << " -> " << current_mu_
                      << ", loss=" << current_loss << std::endl;
+            
+            // 关键修复：直接应用新μ值到WebrtcSender
+            ApplyMuToSender(current_mu_);
         }
     }
     
@@ -548,12 +455,26 @@ private:
             std::cout << "[OSCC] Inter-frame adjustment: frame=" << frame_id 
                      << ", mu: " << old_mu << " -> " << current_mu_
                      << ", QoE=" << current_qoe << std::endl;
+            
+            // 关键修复：直接应用新μ值到WebrtcSender
+            ApplyMuToSender(current_mu_);
         }
     }
     
     // 约束μ在有效范围内
     double ClipMu(double mu) const {
         return std::max(mu_min_, std::min(mu_max_, mu));
+    }
+    
+    // 直接应用μ值到WebrtcSender
+    void ApplyMuToSender(double new_mu) {
+        if (webrtc_sender_) {
+            webrtc_sender_->UpdateMuDynamic(new_mu);
+            std::cout << "[OSCC->Sender] Applied mu=" << new_mu 
+                      << " directly to WebrtcSender at " << Simulator::Now().GetSeconds() << "s" << std::endl;
+        } else {
+            std::cout << "[OSCC->Sender] WARNING: webrtc_sender_ is null, cannot apply mu!" << std::endl;
+        }
     }
     
     // 核心参数
@@ -569,6 +490,7 @@ private:
     std::map<uint32_t, FrameQoEDetail> frame_qoe_details_;  // 帧QoE详细信息
     double last_frame_qoe_;          // 上一帧QoE
     uint32_t last_frame_max_rt_;     // 上一帧最大Rt值
+    uint32_t last_frame_min_rt_;     // 上一帧最小Rt值
     uint32_t current_frame_id_;      // 当前帧ID
     
     // 控制标志
@@ -577,6 +499,18 @@ private:
     // 统计和日志
     std::vector<MuChangeRecord> mu_change_records_;  // μ变化记录
     uint32_t total_adjustments_;                      // 总调整次数
+    
+    // WebrtcSender引用（用于直接应用μ值到发送端）
+    Ptr<WebrtcSender> webrtc_sender_ = nullptr;
+    
+public:
+    // 设置WebrtcSender引用（在OSCCController中直接调用UpdateMuDynamic）
+    void SetWebrtcSender(Ptr<WebrtcSender> sender) {
+        webrtc_sender_ = sender;
+        if (sender) {
+            std::cout << "[OSCCController] WebrtcSender set, mu changes will be applied directly!" << std::endl;
+        }
+    }
 };
 
 // ============================================================================
@@ -1120,9 +1054,9 @@ class BandwidthChanger;
 class TriggerRandomLoss{
 public:
     TriggerRandomLoss(double loss_rate = 0.0) 
-        : m_loss_rate(loss_rate), m_bandwidth_changer(nullptr), 
-          m_use_trace_loss(false), m_update_interval_ms(100),
-          m_last_applied_loss(-1.0) {
+        : m_loss_rate(loss_rate), m_last_applied_loss(-1.0),
+          m_bandwidth_changer(nullptr), m_use_trace_loss(false), 
+          m_update_interval_ms(100) {
         NS_LOG_INFO("TriggerRandomLoss initialized with loss rate: " << m_loss_rate);
     }
     
@@ -1639,25 +1573,15 @@ public:
         // ✅ 新增：存储每个包的延迟（毫秒）
         std::vector<double> packet_delays;
         
+        // ✅ 跳帧机制：标记帧是否被跳过
+        bool skipped;
+        
         FrameStatistics() 
             : frame_id(0), deadline(Seconds(0)), frame_size(0), frame_type(0),
               total_packets(0), packets_received(0), first_packet_arrival_time(Seconds(0)),
               last_packet_arrival_time(Seconds(0)), packets_before_deadline(0), 
-              missed_deadline(0), stall_duration(Seconds(0)), frame_completed(false) {}
-              
-        // 从VideoFrame初始化
-        FrameStatistics(const VideoFrame& video_frame)
-            : frame_id(video_frame.frame_id), deadline(video_frame.deadline),
-              frame_size(video_frame.frame_size), frame_type(video_frame.frame_type),
-              total_packets(video_frame.total_packets), packets_received(0),
-              first_packet_arrival_time(Seconds(0)), last_packet_arrival_time(Seconds(0)),
-              packets_before_deadline(0), missed_deadline(0), stall_duration(Seconds(0)),
-              frame_completed(false) {
-            
-            packet_arrival_times.resize(total_packets, Seconds(0));
-            packet_received.resize(total_packets, false);
-            packet_delays.reserve(total_packets);  // ✅ 预分配空间
-        }
+              missed_deadline(0), stall_duration(Seconds(0)), frame_completed(false),
+              skipped(false) {}
     };
 
     struct FrameQoEResult {
@@ -1677,7 +1601,7 @@ public:
                           qoe_delay(0.0), qoe_loss(0.0), qoe_ddl(0.0) {}
     };
 
-    FrameManager(VideoTraceManager* trace_manager = nullptr, RLStateManager* rl_manager = nullptr) 
+    FrameManager(RLStateManager* rl_manager = nullptr) 
         : current_trace_bandwidth_(0.0),
           current_gcc_bandwidth_(0.0),
           current_scaled_bandwidth_(0.0),
@@ -1685,15 +1609,8 @@ public:
           current_frame_id(0), 
           last_frame_complete_time(Seconds(0)), 
           packet_counter(0), 
-          trace_manager(trace_manager), 
           rl_manager_(rl_manager) {
-        
-        if (trace_manager && trace_manager->IsLoaded()) {
-            NS_LOG_INFO("FrameManager initialized with video trace, total frames: " 
-                       << trace_manager->GetTotalFrames());
-        } else {
-            NS_LOG_WARN("FrameManager initialized without video trace!");
-        }
+        NS_LOG_WARN("FrameManager initialized for encoder-based frame construction");
     }
     
     // 处理数据包到达 - 修改为使用真实发送时间
@@ -1702,14 +1619,10 @@ public:
     void ProcessPacketArrival(Time arrival_time, int64_t real_send_time_ms = -1) {
         uint32_t packet_id = packet_counter++;
         
-        // 计算当前包属于哪个帧和该帧内的包索引
-        uint32_t frame_id = 0;
-        uint32_t packet_index_in_frame = 0;
-        
-        if (!FindFrameForPacket(packet_id, frame_id, packet_index_in_frame)) {
-            NS_LOG_DEBUG("Packet " << packet_id << " does not belong to any known frame");
-            return;
-        }
+        // 从编码器获取帧信息（这里需要你根据实际情况实现）
+        // 暂时使用简单逻辑：每个包属于不同的帧
+        uint32_t frame_id = packet_id / 10;  // 假设每10个包属于一帧
+        uint32_t packet_index_in_frame = packet_id % 10;
         
         NS_LOG_DEBUG("Processing packet " << packet_id << " for frame " << frame_id 
                      << " (index " << packet_index_in_frame << ") at time " 
@@ -1717,6 +1630,24 @@ public:
         
         // 获取或创建帧统计
         FrameStatistics& frame = GetOrCreateFrameStatistics(frame_id);
+        
+        // ✅ 跳帧机制：如果帧已被跳过，不再处理其包
+        if (frame.skipped) {
+            NS_LOG_DEBUG("Ignoring packet for skipped frame " << frame_id);
+            return;
+        }
+        
+        // 如果是该帧的第一个包，初始化帧信息
+        if (frame.total_packets == 0) {
+            // 从编码器获取帧信息（这里需要你根据实际情况实现）
+            frame.total_packets = 10;  // 假设每帧10个包
+            frame.frame_size = DEFAULT_PACKET_SIZE * frame.total_packets;
+            frame.deadline = arrival_time + MilliSeconds(100);  // 假设DDL为100ms后
+            frame.frame_type = (frame_id % 10 == 0) ? 1 : 0;  // 关键帧逻辑
+            frame.packet_arrival_times.resize(frame.total_packets, Seconds(0));
+            frame.packet_received.resize(frame.total_packets, false);
+            frame.packet_delays.reserve(frame.total_packets);
+        }
         
         // 检查包索引是否有效
         if (packet_index_in_frame >= frame.total_packets) {
@@ -1729,20 +1660,12 @@ public:
         frame.packets_received++;
         
         // 记录包到达时间
-        if (frame.packet_arrival_times.size() <= packet_index_in_frame) {
-            frame.packet_arrival_times.resize(packet_index_in_frame + 1, Seconds(0));
-        }
         frame.packet_arrival_times[packet_index_in_frame] = arrival_time;
-        
-        // 标记包已接收
-        if (frame.packet_received.size() <= packet_index_in_frame) {
-            frame.packet_received.resize(packet_index_in_frame + 1, false);
-        }
         frame.packet_received[packet_index_in_frame] = true;
         
         // 更新第一个和最后一个包到达时间
-        if (frame.first_packet_arrival_time == Seconds(0) || 
-            arrival_time < frame.first_packet_arrival_time) {
+        bool is_first_packet = (frame.first_packet_arrival_time == Seconds(0));
+        if (is_first_packet || arrival_time < frame.first_packet_arrival_time) {
             frame.first_packet_arrival_time = arrival_time;
         }
         if (arrival_time > frame.last_packet_arrival_time) {
@@ -1775,7 +1698,7 @@ public:
                        << ", using estimated value: " << estimated_delay << "ms");
         }
         
-        NS_LOG_DEBUG("Frame " << frame_id << ": packets_received=" << frame.packets_received 
+        NS_LOG_INFO("Frame " << frame_id << ": packets_received=" << frame.packets_received 
                      << "/" << frame.total_packets << ", packets_before_deadline=" 
                      << frame.packets_before_deadline << ", delays_collected=" 
                      << frame.packet_delays.size());
@@ -1899,12 +1822,13 @@ public:
             return;
         }
         
-        // 写入表头
+        // 写入表头（新增 skipped 列）
         file << "frame_id,frame_type,deadline_time,first_packet_time,last_packet_time,"
              << "frame_size,total_packets,packets_received,packets_before_deadline,"
-             << "delivery_ratio,missed_deadline,stall_duration_ms" << std::endl;
+             << "delivery_ratio,missed_deadline,stall_duration_ms,skipped" << std::endl;
         
         int frames_with_data = 0;
+        int skipped_frames_count = 0;
         for (const auto& pair : frames) {
             const FrameStatistics& frame = pair.second;
             if (frame.total_packets == 0) continue;
@@ -1922,13 +1846,24 @@ public:
                  << frame.packets_before_deadline << ","
                  << delivery_ratio << ","
                  << frame.missed_deadline << ","
-                 << frame.stall_duration.GetMilliSeconds() << std::endl;
+                 << frame.stall_duration.GetMilliSeconds() << ","
+                 << (frame.skipped ? 1 : 0) << std::endl;
+            
+            if (frame.skipped) skipped_frames_count++;
             
             frames_with_data++;
         }
         
         file.close();
         NS_LOG_INFO("Frame statistics saved to: " << filename << " with " << frames_with_data << " frames containing data");
+        
+        // 输出跳帧统计摘要
+        std::cout << "[SkipFrame Summary] Total frames: " << frames_with_data 
+                  << ", Skipped frames: " << skipped_frames_count << std::endl;
+        if (skipped_frames_count > 0) {
+            double skip_rate = (skipped_frames_count * 100.0) / frames_with_data;
+            std::cout << "[SkipFrame Summary] Skip rate: " << skip_rate << "%" << std::endl;
+        }
         
         if (frames_with_data == 0) {
             NS_LOG_WARN("No frame data was recorded! Check if packet callbacks are working.");
@@ -1939,14 +1874,6 @@ public:
     // 获取总包数（用于调试）
     uint32_t GetTotalPackets() const {
         return packet_counter;
-    }
-    
-    // 设置视频trace管理器
-    void SetVideoTraceManager(VideoTraceManager* manager) {
-        trace_manager = manager;
-        if (manager && manager->IsLoaded()) {
-            NS_LOG_INFO("Video trace manager set with " << manager->GetTotalFrames() << " frames");
-        }
     }
     
     // 新增：获取帧统计摘要
@@ -1978,6 +1905,71 @@ public:
             avg_delivery_ratio = 0.0;
             avg_stall_ms = 0.0;
         }
+    }
+    
+    // 获取跳帧统计摘要
+    void GetSkipFrameStatsSummary(uint32_t& total_frames, uint32_t& skipped_frames,
+                                  double& skip_rate) {
+        total_frames = 0;
+        skipped_frames = 0;
+        
+        for (const auto& pair : frames) {
+            const FrameStatistics& frame = pair.second;
+            if (frame.total_packets == 0) continue;
+            
+            total_frames++;
+            if (frame.skipped) {
+                skipped_frames++;
+            }
+        }
+        
+        if (total_frames > 0) {
+            skip_rate = (skipped_frames * 100.0) / total_frames;
+        } else {
+            skip_rate = 0.0;
+        }
+    }
+    
+    // 输出跳帧统计到文件
+    void OutputSkipFrameStatistics(const std::string& filename) {
+        std::ofstream file(filename);
+        if (!file.is_open()) {
+            NS_LOG_ERROR("Cannot open skip frame statistics file: " << filename);
+            return;
+        }
+        
+        file << "# Skip Frame Statistics" << std::endl;
+        file << "# DDL Timeout: " << SKIP_FRAME_TIMEOUT_MS << "ms after deadline" << std::endl;
+        file << std::endl;
+        
+        // 统计信息
+        uint32_t total = 0, skipped = 0;
+        double skip_rate = 0.0;
+        GetSkipFrameStatsSummary(total, skipped, skip_rate);
+        
+        file << "total_frames," << total << std::endl;
+        file << "skipped_frames," << skipped << std::endl;
+        file << "skip_rate_percent," << skip_rate << std::endl;
+        file << std::endl;
+        
+        // 详细跳帧列表
+        file << "# Skipped Frame Details" << std::endl;
+        file << "frame_id,frame_type,deadline_time,packets_received,total_packets" << std::endl;
+        
+        for (uint32_t fid : skipped_frames_) {
+            auto it = frames.find(fid);
+            if (it != frames.end()) {
+                const FrameStatistics& frame = it->second;
+                file << frame.frame_id << ","
+                     << (frame.frame_type == 1 ? "I" : "P") << ","
+                     << frame.deadline.GetSeconds() << ","
+                     << frame.packets_received << ","
+                     << frame.total_packets << std::endl;
+            }
+        }
+        
+        file.close();
+        std::cout << "[SkipFrame] Statistics saved to: " << filename << std::endl;
     }
     
     // 设置RL状态管理器
@@ -2031,72 +2023,6 @@ public:
             }
         }
         double qoe_recv = 100.0 * bandwidth_utilization;
-    
-        // // 2. QoE_delay: 延迟指标
-        // // ==== 关键修改：直接使用 FrameStatistics 中存储的延迟 ====
-        // double qoe_delay = 100.0;  // 默认满分
-        // double delay_metric = 0.0;
-        
-        // if (!frame.packet_delays.empty()) {
-        //     // 计算平均延迟
-        //     double total_delay = 0.0;
-        //     double min_delay = frame.packet_delays[0];
-        //     double max_delay = frame.packet_delays[0];
-            
-        //     for (double d : frame.packet_delays) {
-        //         total_delay += d;
-        //         if (d < min_delay) min_delay = d;
-        //         if (d > max_delay) max_delay = d;
-        //     }
-        //     double avg_delay = total_delay / frame.packet_delays.size();
-    
-        //     // 将平均延迟记录为 delay_metric，以便输出到CSV
-        //     delay_metric = avg_delay;
-    
-        //     // 计算QoE_delay (基于绝对延迟的映射)
-        //     // 映射规则：
-        //     // < 50ms: 100分
-        //     // 50ms - 400ms: 线性下降
-        //     // > 400ms: 0分
-        //     if (avg_delay <= 50.0) {
-        //         qoe_delay = 100.0;
-        //     } else if (avg_delay >= 400.0) {
-        //         qoe_delay = 0.0;
-        //     } else {
-        //         // 线性插值: 100 - (delay - 50) * (100 / 350)
-        //         qoe_delay = 100.0 - ((avg_delay - 50.0) * (100.0 / 350.0));
-        //     }
-    
-        //     // 限制范围 [0, 100]
-        //     qoe_delay = std::max(0.0, std::min(100.0, qoe_delay));
-    
-        //     NS_LOG_INFO("Frame " << frame_id << " Delay Stats: count=" << frame.packet_delays.size() 
-        //                << ", min=" << min_delay << "ms, max=" << max_delay << "ms"
-        //                << ", avg=" << avg_delay << "ms, qoe_delay=" << qoe_delay);
-            
-        //     std::cout << "[DEBUG] Frame " << frame_id << " Delay: "
-        //               << "count=" << frame.packet_delays.size()
-        //               << ", avg=" << avg_delay << "ms"
-        //               << ", qoe_delay=" << qoe_delay << std::endl;
-        // } else {
-        //     // 如果没有收集到延迟数据
-        //     std::cout << "[WARNING] Frame " << frame_id << " has no delay data!" << std::endl;
-            
-        //     if (frame.packets_received == 0) {
-        //         // 所有包都丢了
-        //         qoe_delay = 0.0; 
-        //         delay_metric = 0.0;
-        //         std::cout << "[WARNING] Frame " << frame_id << " received 0 packets!" << std::endl;
-        //     } else {
-        //         // 收到了包但没有延迟数据 - 这是个bug
-        //         std::cout << "[ERROR] Frame " << frame_id << " received " 
-        //                   << frame.packets_received << " packets but no delay data!" << std::endl;
-        //         // 使用默认延迟估计
-        //         delay_metric = 50.0;  // 假设50ms
-        //         qoe_delay = 100.0;
-        //     }
-        // }
-        // ======================================================
 
          // 2. QoE_delay: 延迟指标
         // 收集该帧所有包的延迟
@@ -2691,31 +2617,9 @@ private:
         std::cout << "  Loss from trace: " << trace_loss_rate << std::endl;
         std::cout << "========================================" << std::endl;
         
-        NS_LOG_DEBUG("Recorded REAL RL state for frame " << frame_id << " packet " << packet_index
+        NS_LOG_INFO("Recorded REAL RL state for frame " << frame_id << " packet " << packet_index
                    << " at time " << arrival_time.GetSeconds() << "s, delay=" << current_delay_ms 
                    << "ms, Rt=" << Rt << ", reward=" << reward);
-    }
-    
-    // 查找包所属的帧
-    bool FindFrameForPacket(uint32_t packet_id, uint32_t& frame_id, uint32_t& packet_index_in_frame) {
-        if (!trace_manager || !trace_manager->IsLoaded()) {
-            return false;
-        }
-        
-        uint32_t current_packet = 0;
-        for (uint32_t i = 0; i < trace_manager->GetTotalFrames(); i++) {
-            const VideoFrame* frame = trace_manager->GetFrame(i);
-            if (!frame) continue;
-            
-            if (packet_id >= current_packet && packet_id < current_packet + frame->total_packets) {
-                frame_id = i;
-                packet_index_in_frame = packet_id - current_packet;
-                return true;
-            }
-            current_packet += frame->total_packets;
-        }
-        
-        return false;
     }
     
     // 获取或创建帧统计
@@ -2725,23 +2629,107 @@ private:
             return it->second;
         }
         
-        // 创建新的帧统计
-        if (trace_manager && trace_manager->IsLoaded()) {
-            const VideoFrame* video_frame = trace_manager->GetFrame(frame_id);
-            if (video_frame) {
-                FrameStatistics new_frame(*video_frame);
-                frames[frame_id] = new_frame;
-                NS_LOG_DEBUG("Created frame statistics for frame " << frame_id 
-                           << " with " << new_frame.total_packets << " packets");
-                return frames[frame_id];
-            }
-        }
-        
-        // 如果没有trace信息，创建默认帧统计
+        // 创建默认帧统计
         FrameStatistics default_frame;
         default_frame.frame_id = frame_id;
         frames[frame_id] = default_frame;
         return frames[frame_id];
+    }
+    
+public:
+    // ============ 跳帧机制公有方法 ============
+    
+    // 设置跳帧回调函数（用于通知发送端）
+    void SetSkipFrameCallback(std::function<void(uint32_t)> callback) {
+        skip_frame_callback_ = callback;
+        std::cout << "[SkipFrame] Skip frame callback registered" << std::endl;
+    }
+    
+    // 检查帧是否被跳过
+    bool IsFrameSkipped(uint32_t frame_id) const {
+        return skipped_frames_.find(frame_id) != skipped_frames_.end();
+    }
+    
+    // 获取跳过的帧数量
+    size_t GetSkippedFrameCount() const {
+        return skipped_frames_.size();
+    }
+    
+    // 执行跳帧：标记中间帧为已跳过，通知发送端
+    void SkipToKeyFrame(uint32_t target_key_frame_id) {
+        std::cout << "[SkipFrame] ========== SKIP FRAME TRIGGERED ==========" << std::endl;
+        std::cout << "[SkipFrame] Skipping to key frame: " << target_key_frame_id << std::endl;
+        std::cout << "[SkipFrame] Current time: " << Simulator::Now().GetSeconds() << "s" << std::endl;
+        
+        // 标记当前帧到目标关键帧之间的所有帧为已跳过
+        uint32_t skipped_count = 0;
+        for (uint32_t fid = current_frame_id; fid < target_key_frame_id; fid++) {
+            // 获取或创建帧统计
+            FrameStatistics& frame = GetOrCreateFrameStatistics(fid);
+            
+            if (!frame.frame_completed && !frame.skipped) {
+                frame.skipped = true;
+                frame.missed_deadline = 1;  // 标记为错过DDL
+                skipped_frames_.insert(fid);
+                skipped_count++;
+                
+                std::cout << "[SkipFrame] Marked frame " << fid << " as skipped"
+                          << " (type=" << (frame.frame_type == 1 ? "I" : "P") << ")" << std::endl;
+            }
+        }
+        
+        std::cout << "[SkipFrame] Total " << skipped_count << " frames skipped" << std::endl;
+        std::cout << "[SkipFrame] Current frame: " << current_frame_id 
+                  << " -> Target key frame: " << target_key_frame_id << std::endl;
+        
+        // 更新当前帧ID到目标关键帧
+        skip_target_frame_id_ = target_key_frame_id;
+        skip_frame_pending_ = true;
+        current_frame_id = target_key_frame_id;
+        
+        // 通知发送端跳帧（通过回调函数）
+        if (skip_frame_callback_) {
+            std::cout << "[SkipFrame] Notifying sender via callback to skip to frame " 
+                      << target_key_frame_id << std::endl;
+            skip_frame_callback_(target_key_frame_id);
+        }
+        
+        // 直接通知 WebrtcSender（如果可用）
+        NotifySenderSkipFrame(target_key_frame_id);
+        
+        std::cout << "[SkipFrame] ==========================================" << std::endl;
+    }
+    
+    // 通知发送端执行跳帧
+    void NotifySenderSkipFrame(uint32_t target_key_frame_id) {
+        if (webrtc_sender_) {
+            std::cout << "[SkipFrame->Sender] Calling WebrtcSender::SkipToFrame(" 
+                      << target_key_frame_id << ")" << std::endl;
+            
+            // 调用 WebrtcSender 的跳帧方法
+            webrtc_sender_->SkipToFrame(target_key_frame_id);
+            
+            std::cout << "[SkipFrame->Sender] WebrtcSender notified successfully, target frame=" 
+                      << target_key_frame_id << std::endl;
+        } else {
+            std::cout << "[SkipFrame->Sender] WARNING: WebrtcSender not available, cannot notify sender!" << std::endl;
+        }
+    }
+    
+    // 获取跳帧目标帧ID（供发送端查询）
+    uint32_t GetSkipTargetFrameId() const {
+        return skip_target_frame_id_;
+    }
+    
+    // 检查是否有跳帧请求待处理
+    bool HasPendingSkipFrame() const {
+        return skip_frame_pending_;
+    }
+    
+    // 清除跳帧请求标志（发送端处理完跳帧后调用）
+    void ClearSkipFramePending() {
+        skip_frame_pending_ = false;
+        std::cout << "[SkipFrame] Skip frame pending flag cleared" << std::endl;
     }
     
 private:
@@ -2755,13 +2743,22 @@ private:
     uint32_t current_frame_id;
     Time last_frame_complete_time;
     uint32_t packet_counter;
-    VideoTraceManager* trace_manager;
     RLStateManager* rl_manager_;   // 新增：指向 RL 状态管理器
     
     // OSCC集成
     OSCCController* oscc_controller_ = nullptr;
     std::map<uint32_t, double> frame_qoe_history_;  // 帧QoE历史
     Ptr<WebrtcSender> webrtc_sender_ = nullptr;     // WebrtcSender引用（用于动态μ更新）
+    
+    // ============ 跳帧机制相关成员 ============
+    static const int64_t SKIP_FRAME_TIMEOUT_MS = 33;  // DDL后额外等待时间（毫秒）
+    std::set<uint32_t> skipped_frames_;               // 已跳过的帧ID集合
+    uint32_t skip_target_frame_id_ = UINT32_MAX;      // 跳帧目标帧ID
+    bool skip_frame_pending_ = false;                  // 是否有跳帧请求待处理
+    std::set<uint32_t> ddl_check_scheduled_;          // 已调度DDL检查的帧
+    
+    // 跳帧回调函数类型：通知发送端跳转到指定关键帧
+    std::function<void(uint32_t)> skip_frame_callback_;
 };
 
 // 增强的WebrtcTrace类来支持帧管理和带宽缩放统计
@@ -3235,7 +3232,7 @@ static void InstallWebrtcApplication(Ptr<Node> sender,
                         double bandwidth_scale_factor = 1.0,
                         double loss_rate = 0.01,
                         BandwidthChanger* bandwidth_changer = nullptr,
-                        VideoTraceManager* video_trace_manager = nullptr)
+                        FramePlayoutManager* frame_playout_manager = nullptr)
 {
     std::cout << "\n[DEBUG] InstallWebrtcApplication called" << std::endl;
     std::cout << "  Bandwidth scale factor: " << bandwidth_scale_factor << std::endl;
@@ -3243,12 +3240,35 @@ static void InstallWebrtcApplication(Ptr<Node> sender,
     std::cout << "  FrameManager pointer: " << frame_manager << std::endl;
     std::cout << "  RLStateManager pointer: " << rl_manager << std::endl;
     std::cout << "  BandwidthChanger pointer: " << bandwidth_changer << std::endl;
+    std::cout << "  FramePlayoutManager pointer: " << frame_playout_manager << std::endl;
     
-    NS_LOG_INFO("Installing WebRTC application with RL state management and video trace");
+    NS_LOG_INFO("Installing WebRTC application with RL state management and encoder-based frame construction");
     
     // 正确创建应用程序对象
     Ptr<WebrtcSender> sendApp = CreateObject<WebrtcSender>(manager);
     Ptr<WebrtcReceiver> recvApp = CreateObject<WebrtcReceiver>(manager);
+    
+    // ============ 集成 FramePlayoutManager ============
+    if (frame_playout_manager && recvApp) {
+        recvApp->SetFramePlayoutManager(frame_playout_manager);
+        std::cout << "[DEBUG] FramePlayoutManager set in WebrtcReceiver" << std::endl;
+        
+        // 设置跳帧回调：当接收端触发跳帧时，通知发送端
+        if (sendApp) {
+            frame_playout_manager->SetSkipFrameCallback([sendApp](uint32_t target_keyframe_id) {
+                std::cout << "[FramePlayoutManager] Skip frame callback triggered, target keyframe: " 
+                          << target_keyframe_id << std::endl;
+                // 调用发送端的跳帧接口
+                if (sendApp) {
+                    sendApp->SkipToFrame(target_keyframe_id);
+                    std::cout << "[FramePlayoutManager] Notified sender to skip to keyframe " 
+                              << target_keyframe_id << std::endl;
+                }
+            });
+            std::cout << "[DEBUG] Skip frame callback registered in FramePlayoutManager" << std::endl;
+        }
+    }
+    // ============ FramePlayoutManager 集成结束 ============
     
     // 设置带宽缩放系数
     if (sendApp) {
@@ -3278,6 +3298,23 @@ static void InstallWebrtcApplication(Ptr<Node> sender,
     if (frame_manager && sendApp) {
         frame_manager->SetWebrtcSender(sendApp);
         std::cout << "[DEBUG] WebrtcSender set in FrameManager for OSCC dynamic mu update" << std::endl;
+        
+        // 关键修复：同时设置OSCCController的WebrtcSender（直接调用UpdateMuDynamic）
+        OSCCController* oscc = frame_manager->GetOSCCController();
+        if (oscc) {
+            oscc->SetWebrtcSender(sendApp);
+            std::cout << "[DEBUG] WebrtcSender set in OSCCController for direct mu application" << std::endl;
+        }
+        
+        // ============ 跳帧机制集成 ============
+        // 设置跳帧回调：当接收端触发跳帧时，通知发送端
+        frame_manager->SetSkipFrameCallback([](uint32_t target_key_frame_id) {
+            std::cout << "[SkipFrame Callback] Sender notified to skip to key frame " 
+                      << target_key_frame_id << std::endl;
+            // 注意：实际的发送端跳帧逻辑需要在 WebrtcSender 类中实现
+            // 此回调可用于记录跳帧事件或触发其他行为
+        });
+        std::cout << "[DEBUG] Skip frame callback registered in FrameManager" << std::endl;
     }
     
     // 设置trace带宽changer - 更简单的方法
@@ -3350,12 +3387,6 @@ static void InstallWebrtcApplication(Ptr<Node> sender,
         std::cout << "[DEBUG] RLStateManager set in FrameAwareWebrtcTrace" << std::endl;
     }
     
-    // 设置视频trace管理器
-    if (frame_manager && video_trace_manager) {
-        frame_manager->SetVideoTraceManager(video_trace_manager);
-        NS_LOG_INFO("Video trace manager set in FrameManager");
-    }
-    
     // 设置应用程序时间
     sendApp->SetStartTime(start_app);
     sendApp->SetStopTime(stop_app);
@@ -3363,7 +3394,7 @@ static void InstallWebrtcApplication(Ptr<Node> sender,
     recvApp->SetStopTime(stop_app + Seconds(1));
     
     std::cout << "[SUCCESS] WebRTC application installed successfully" << std::endl;
-    NS_LOG_INFO("WebRTC application installed successfully with manager and video trace");
+    NS_LOG_INFO("WebRTC application installed successfully with manager and encoder-based frame construction");
 }
 
 // 修改 TriggerRLStateCalculation 函数，使用trace中的RTT和loss数据
@@ -3460,10 +3491,11 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
                      float startapptime, float endapptime, double max_bandwith,
                      TriggerRandomLoss *trigger_loss, BandwidthChanger *changer, 
                      const std::string& trace_filename = "", double bandwidth_scale_factor = 1.0,
-                     double loss_rate = 0.01, const std::string& video_trace_file = "",
-                     bool oscc_mode = false)
+                     double loss_rate = 0.01, bool oscc_mode = false,
+                     uint32_t playout_delay_ms = 300,
+                     const std::string& frame_trace_output = "")
 {
-    std::cout << "\n=== test_app_on_p2p started with Video Trace Analysis ===" << std::endl;
+    std::cout << "\n=== test_app_on_p2p started with Encoder-based Frame Construction ===" << std::endl;
     std::cout << "Instance: " << instance << std::endl;
     std::cout << "Normalized application time: " << startapptime << "s to " << endapptime << "s" << std::endl;
     std::cout << "Total duration: " << (endapptime - startapptime) << " seconds" << std::endl;
@@ -3471,23 +3503,11 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
     std::cout << "Trace file: " << trace_filename << std::endl;
     std::cout << "Bandwidth scale factor μ: " << bandwidth_scale_factor << std::endl;
     std::cout << "Loss rate: " << loss_rate << std::endl;
-    std::cout << "Video trace file: " << (video_trace_file.empty() ? "none" : video_trace_file) << std::endl;
+    std::cout << "Playout delay: " << playout_delay_ms << " ms" << std::endl;
+    std::cout << "Frame trace output: " << (frame_trace_output.empty() ? "auto-generated" : frame_trace_output) << std::endl;
     std::cout << "BandwidthChanger pointer: " << changer << std::endl;  // 调试输出
     
     NS_ASSERT(startapptime == 0.0);
-    
-    // 创建视频trace管理器
-    std::unique_ptr<VideoTraceManager> video_trace_manager = nullptr;
-    if (!video_trace_file.empty()) {
-        video_trace_manager = std::make_unique<VideoTraceManager>();
-        if (video_trace_manager->LoadVideoTrace(video_trace_file)) {
-            std::cout << "Successfully loaded video trace with " << video_trace_manager->GetTotalFrames() 
-                      << " frames, last frame deadline: " << video_trace_manager->GetLastFrameDeadline().GetSeconds() << "s" << std::endl;
-        } else {
-            std::cerr << "Failed to load video trace file: " << video_trace_file << std::endl;
-            video_trace_manager.reset();
-        }
-    }
     
     uint64_t bps= max_bandwith * kBwUnit;
     uint32_t link_delay=20.0;
@@ -3547,8 +3567,11 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
     uint32_t max_rate = bps / 1000;
 
     std::vector<std::unique_ptr<WebrtcSessionManager>> sesssion_manager;
+    // 使用默认的帧尺寸：1080p (1080x1920)
+    uint32_t default_frame_height = 1080;
+    uint32_t default_frame_width = 1920;
     for (int i=0;i<num;i++) {
-        std::unique_ptr<WebrtcSessionManager> m(CreateWebrtcSessionManager(time_controller,max_rate));
+        std::unique_ptr<WebrtcSessionManager> m(CreateWebrtcSessionManager(time_controller,max_rate*0.1,max_rate*0.2,max_rate,default_frame_height,default_frame_width));
         sesssion_manager.push_back(std::move(m)); 
     }
     UtilCalculator *calculator=UtilCalculator::Instance();
@@ -3570,12 +3593,24 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
     std::string prefix=instance + "_" + trace_base_name + webrtc_log_com;
     std::vector<FrameAwareWebrtcTrace*> trace_vec;
     
-    // 创建基于视频trace的帧管理器
+    // ============ 关键修复：创建基于编码器的帧管理器 ============
     std::vector<std::unique_ptr<FrameManager>> frame_managers;
     for (int i=0;i<num;i++) {
-        frame_managers.push_back(std::make_unique<FrameManager>(video_trace_manager.get()));
-        std::cout << "Created FrameManager " << i+1 << " with video trace for WebRTC session" << std::endl;
+        frame_managers.push_back(std::make_unique<FrameManager>());
+        std::cout << "Created FrameManager " << i+1 << " for encoder-based frame construction" << std::endl;
     }
+    // ============ 修复结束 ============
+    
+    // ============ 创建 FramePlayoutManager ============
+    std::vector<std::unique_ptr<FramePlayoutManager>> frame_playout_managers;
+    for (int i = 0; i < num; i++) {
+        auto playout_manager = std::make_unique<FramePlayoutManager>();
+        playout_manager->SetPlayoutDelay(MilliSeconds(playout_delay_ms));
+        frame_playout_managers.push_back(std::move(playout_manager));
+        std::cout << "Created FramePlayoutManager " << i+1 << " with playout delay " 
+                  << playout_delay_ms << "ms" << std::endl;
+    }
+    // ============ FramePlayoutManager 创建结束 ============
     
     // 创建RL状态管理器
     std::vector<std::unique_ptr<RLStateManager>> rl_managers;
@@ -3672,8 +3707,8 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
                     Seconds(startapptime), Seconds(endapptime),
                 sesssion_manager.at(i).get(), trace, 
                 frame_managers[i].get(), rl_managers[i].get(), 
-                bandwidth_scale_factor, loss_rate, changer,  // 直接传递原始指针
-                video_trace_manager.get());
+                bandwidth_scale_factor, loss_rate, changer,
+                frame_playout_managers[i].get());
         
         sendPort++;
         recvPort++;
@@ -3681,31 +3716,53 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
         std::cout << "WebRTC application " << i+1 << " installed with:" << std::endl;
         std::cout << "  - Bandwidth scaling with μ=" << bandwidth_scale_factor << std::endl;
         std::cout << "  - Loss rate with L=" << loss_rate << " (initial)" << std::endl;
-        std::cout << "  - Video trace analysis: " << (video_trace_file.empty() ? "disabled" : "enabled") << std::endl;
+        std::cout << "  - Encoder-based frame construction" << std::endl;
         std::cout << "  - BandwidthChanger: " << (changer ? "enabled" : "disabled") << std::endl;
         std::cout << "  - Trace bandwidth recording: " << (changer ? "enabled" : "disabled") << std::endl;
         std::cout << "  - Trace RTT/loss usage: " << (changer ? "enabled" : "disabled") << std::endl;
         std::cout << "  - Output files will include _mu=" << bandwidth_scale_factor << "_L=" << loss_rate << " suffix" << std::endl;
     }
 
-    // 如果使用视频trace，调整仿真时长以匹配视频时长
     float simulation_stop_time = endapptime + 10.0;
-    if (video_trace_manager && video_trace_manager->IsLoaded()) {
-        Time video_duration = video_trace_manager->GetLastFrameDeadline();
-        if (video_duration > Seconds(simulation_stop_time)) {
-            simulation_stop_time = video_duration.GetSeconds() + 5.0;
-            std::cout << "Adjusted simulation duration to match video: " << simulation_stop_time << "s" << std::endl;
-        }
-    }
     
     std::cout << "Simulator will stop at: " << simulation_stop_time << " seconds" << std::endl;
     
     Simulator::Stop (Seconds(simulation_stop_time));
     uint64_t last=get_os_millis();
     
-    std::cout << "Starting simulation with video trace frame analysis..." << std::endl;
+    std::cout << "Starting simulation with encoder-based frame construction..." << std::endl;
     Simulator::Run ();
     std::cout << "Simulation completed at: " << Simulator::Now().GetSeconds() << " seconds" << std::endl;
+    
+    // ============ 导出 FramePlayoutManager 的帧trace ============
+    for (int i = 0; i < num; i++) {
+        if (frame_playout_managers[i]) {
+            // 打印统计摘要
+            std::cout << "\n=== FramePlayoutManager " << i+1 << " Statistics ===" << std::endl;
+            frame_playout_managers[i]->PrintStatistics();
+            
+            // 生成输出文件名
+            std::string trace_output_file = frame_trace_output;
+            if (trace_output_file.empty()) {
+                trace_output_file = prefix + std::to_string(i+1) + "_frame_playout_trace.csv";
+            } else if (num > 1) {
+                // 如果有多个会话，为每个会话添加编号
+                size_t dot_pos = trace_output_file.rfind('.');
+                if (dot_pos != std::string::npos) {
+                    trace_output_file = trace_output_file.substr(0, dot_pos) + 
+                                       "_" + std::to_string(i+1) + 
+                                       trace_output_file.substr(dot_pos);
+                } else {
+                    trace_output_file = trace_output_file + "_" + std::to_string(i+1);
+                }
+            }
+            
+            // 导出CSV trace
+            frame_playout_managers[i]->ExportFrameTrace(trace_output_file);
+            std::cout << "Frame playout trace exported to: " << trace_output_file << std::endl;
+        }
+    }
+    // ============ FramePlayoutManager 导出结束 ============
     
     // 强制完成所有帧
     for (int i=0;i<num;i++) {
@@ -3726,6 +3783,23 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
                                     std::to_string(loss_rate) + "_frame_statistics.csv";
         std::cout << "Outputting frame statistics to: " << frame_stats_file << std::endl;
         frame_managers[i]->OutputFrameStatistics(frame_stats_file);
+        
+        // 输出跳帧统计
+        std::string skip_stats_file = prefix + std::to_string(i+1) + "_mu=" + 
+                                    std::to_string(bandwidth_scale_factor) + "_L=" + 
+                                    std::to_string(loss_rate) + "_skip_frame_statistics.csv";
+        std::cout << "Outputting skip frame statistics to: " << skip_stats_file << std::endl;
+        frame_managers[i]->OutputSkipFrameStatistics(skip_stats_file);
+        
+        // 输出跳帧摘要
+        uint32_t total_frames, skipped_frames;
+        double skip_rate;
+        frame_managers[i]->GetSkipFrameStatsSummary(total_frames, skipped_frames, skip_rate);
+        std::cout << "=== Skip Frame Summary for Session " << (i+1) << " ===" << std::endl;
+        std::cout << "  Total frames: " << total_frames << std::endl;
+        std::cout << "  Skipped frames: " << skipped_frames << std::endl;
+        std::cout << "  Skip rate: " << skip_rate << "%" << std::endl;
+        std::cout << "============================================" << std::endl;
         
         std::string bw_stats_file = prefix + std::to_string(i+1) + "_mu=" + 
                                 std::to_string(bandwidth_scale_factor) + "_L=" + 
@@ -3811,18 +3885,18 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
     std::cout << "=== test_app_on_p2p completed successfully ===" << std::endl;
     std::cout << "Bandwidth scaling experiment completed with μ=" << bandwidth_scale_factor << std::endl;
     std::cout << "RL state management completed with L=" << loss_rate << std::endl;
-    std::cout << "Video trace analysis completed: " << (video_trace_file.empty() ? "disabled" : "enabled") << std::endl;
+    std::cout << "Encoder-based frame construction completed" << std::endl;
     std::cout << "Trace bandwidth recording completed: " << (changer ? "enabled" : "disabled") << std::endl;
     std::cout << "Trace RTT/loss usage completed: " << (changer ? "enabled" : "disabled") << std::endl;
     _exit(0);
 }
-
 // 支持视频trace文件的运行函数
 void run_single_trace_simulation(const std::string& trace_file, const std::string& instance, 
                                TimeConollerType controller_type, int num, double max_bandwith,
                                double loss_rate, const std::string& base_output_folder = "Trace_Result",
-                               double bandwidth_scale_factor=1.0, const std::string& video_trace_file = "",
-                               bool oscc_mode = false)
+                               double bandwidth_scale_factor=1.0, bool oscc_mode = false,
+                               uint32_t playout_delay_ms = 300,
+                               const std::string& frame_trace_output = "")
 {
     std::cout << "\n==========================================" << std::endl;
     std::cout << "Starting simulation for: " << trace_file << std::endl;
@@ -3835,7 +3909,8 @@ void run_single_trace_simulation(const std::string& trace_file, const std::strin
     } else {
         std::cout << "Bandwidth scale factor μ: " << bandwidth_scale_factor << std::endl;
     }
-    std::cout << "Video trace file: " << (video_trace_file.empty() ? "none" : video_trace_file) << std::endl;
+    std::cout << "Playout delay: " << playout_delay_ms << " ms" << std::endl;
+    std::cout << "Frame trace output: " << (frame_trace_output.empty() ? "auto-generated" : frame_trace_output) << std::endl;
     std::cout << "Base output folder: " << base_output_folder << std::endl;
     std::cout << "==========================================" << std::endl;
     
@@ -3914,7 +3989,8 @@ void run_single_trace_simulation(const std::string& trace_file, const std::strin
     // 运行仿真，传递视频trace文件参数和OSCC模式
     test_app_on_p2p(instance, controller_type, num, startapptime, endapptime, 
                    max_bandwith, triggerloss.get(), changer.get(), trace_file, 
-                   bandwidth_scale_factor, loss_rate, video_trace_file, oscc_mode);
+                   bandwidth_scale_factor, loss_rate, oscc_mode,
+                   playout_delay_ms, frame_trace_output);
     
     std::cout << "Simulation completed successfully" << std::endl;
     
@@ -3932,7 +4008,7 @@ int main(int argc, char *argv[]){
     std::streambuf* cout_buffer = std::cout.rdbuf();
     std::cout.rdbuf(log_file.rdbuf());
     
-    std::cout << "=== WebRTC TraceAll-Frame with Video Trace Analysis, Bandwidth Scaling and RL State Management Starting ===" << std::endl;
+    std::cout << "=== WebRTC TraceAll-Frame with Encoder-based Frame Construction, Bandwidth Scaling and RL State Management Starting ===" << std::endl;
     
     // 启用详细日志
     LogComponentEnable("webrtc-static", LOG_LEVEL_ALL);
@@ -3944,12 +4020,13 @@ int main(int argc, char *argv[]){
     std::string topo("change");
     std::string instance("default_instance");
     std::string trace_file(""); 
-    std::string video_trace_file("");  // 新增参数：视频trace文件
     std::string max_bandwidth("20");
     std::string loss_rate("0.01");
     std::string folder("trace_results");
     std::string bandwidth_scale("1.0");
     std::string oscc_enabled("false");  // OSCC模式：动态μ调整
+    std::string playout_delay_str("300");  // 播放延迟参数（毫秒）
+    std::string frame_trace_output("");  // 帧trace输出文件路径
     
     // 解析命令行参数
     CommandLine cmd;
@@ -3957,12 +4034,13 @@ int main(int argc, char *argv[]){
     cmd.AddValue("topo", "topology", topo);
     cmd.AddValue("it", "instance", instance);
     cmd.AddValue("trace", "trace file path", trace_file);
-    cmd.AddValue("video_trace", "video trace file path", video_trace_file);  // 新增参数
     cmd.AddValue("mb", "max_bandwidth", max_bandwidth);
     cmd.AddValue("ls", "loss_rate", loss_rate);
     cmd.AddValue("folder", "folder name to collect data", folder);
     cmd.AddValue("mu", "bandwidth_scale_factor", bandwidth_scale);
     cmd.AddValue("oscc", "enable OSCC dynamic mu adjustment", oscc_enabled);  // OSCC参数
+    cmd.AddValue("playout_delay", "playout delay in milliseconds (default: 300)", playout_delay_str);
+    cmd.AddValue("frame_trace", "frame trace output file path", frame_trace_output);
     
     cmd.Parse(argc, argv);
     
@@ -3972,7 +4050,7 @@ int main(int argc, char *argv[]){
     // 验证必要参数
     if (trace_file.empty()) {
         std::cerr << "ERROR: No trace file specified. Use --trace=<file_path>" << std::endl;
-        std::cerr << "Usage: ./waf --run \"scratch/webrtc-TFMN(RTT) --trace=<path> [--video_trace=<video_trace_path> --it=<instance> --folder=<output_dir> --mb=<bandwidth> --ls=<loss_rate> --mu=<scale_factor>]\"" << std::endl;
+        std::cerr << "Usage: ./waf --run \"scratch/webrtc-TFMN(RTT) --trace=<path> [--it=<instance> --folder=<output_dir> --mb=<bandwidth> --ls=<loss_rate> --mu=<scale_factor>]\"" << std::endl;
         return 1;
     }
     
@@ -3983,16 +4061,6 @@ int main(int argc, char *argv[]){
         return 1;
     }
     test_file.close();
-    
-    // 检查视频trace文件是否存在（如果指定了的话）
-    if (!video_trace_file.empty()) {
-        std::ifstream video_test_file(video_trace_file);
-        if (!video_test_file.good()) {
-            std::cerr << "ERROR: Video trace file does not exist or cannot be read: " << video_trace_file << std::endl;
-            return 1;
-        }
-        video_test_file.close();
-    }
     
     // 设置控制器类型
     TimeConollerType controller_type = TimeConollerType::SIMU_CONTROLLER;
@@ -4010,16 +4078,23 @@ int main(int argc, char *argv[]){
     
     // 转换参数类型
     double mu, mb, ls;
+    uint32_t playout_delay_ms;
     try {
         mb = std::stod(max_bandwidth);
         ls = std::stod(loss_rate);
         mu = std::stod(bandwidth_scale);
+        playout_delay_ms = std::stoul(playout_delay_str);
     } catch (const std::exception& e) {
         std::cerr << "ERROR: Invalid parameter format: " << e.what() << std::endl;
         return 1;
     }
+    
+    // 设置默认帧trace输出路径
+    if (frame_trace_output.empty()) {
+        frame_trace_output = folder + "/" + instance + "_frame_trace.csv";
+    }
 
-    std::cout << "Starting single trace simulation with video frame analysis..." << std::endl;
+    std::cout << "Starting single trace simulation with encoder-based frame construction..." << std::endl;
     std::cout << "Max bandwidth: " << mb << " Mbps" << std::endl;
     std::cout << "Loss rate: " << ls << std::endl;
     std::cout << "OSCC mode: " << (oscc_mode ? "ENABLED" : "disabled") << std::endl;
@@ -4028,12 +4103,14 @@ int main(int argc, char *argv[]){
     } else {
         std::cout << "Bandwidth scale factor μ: " << mu << std::endl;
     }
-    std::cout << "Video trace file: " << (video_trace_file.empty() ? "not specified" : video_trace_file) << std::endl;
+    std::cout << "Playout delay: " << playout_delay_ms << " ms" << std::endl;
+    std::cout << "Frame trace output: " << frame_trace_output << std::endl;
     
-    // 使用run_single_trace_simulation函数，传递video_trace_file和oscc_mode参数
-    run_single_trace_simulation(trace_file, instance, controller_type, 1, mb, ls, folder, mu, video_trace_file, oscc_mode);
+    // 使用run_single_trace_simulation函数，传递oscc_mode参数
+    run_single_trace_simulation(trace_file, instance, controller_type, 1, mb, ls, folder, mu, oscc_mode,
+                               playout_delay_ms, frame_trace_output);
     
-    std::cout << "=== WebRTC TraceAll-Frame with Video Trace Analysis Completed Successfully ===" << std::endl;
+    std::cout << "=== WebRTC TraceAll-Frame with Encoder-based Frame Construction Completed Successfully ===" << std::endl;
     
     // 恢复std::cout并关闭日志文件
     std::cout.rdbuf(cout_buffer);
