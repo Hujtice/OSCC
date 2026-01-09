@@ -9,10 +9,12 @@ NS_LOG_COMPONENT_DEFINE("FramePlayoutManager");
 
 FramePlayoutManager::FramePlayoutManager()
     : playout_delay_(MilliSeconds(300)),  // 默认300ms播放延迟
+      fps_(30),
+      first_frame_playout_time_(Seconds(0)),
+      baseline_established_(false),
       current_playback_frame_(0),
       total_frames_(0),
       completed_frames_(0),
-      skipped_frames_(0),
       on_time_frames_(0),
       skip_frame_pending_(false),
       skip_target_frame_id_(UINT32_MAX) {
@@ -32,9 +34,27 @@ void FramePlayoutManager::SetPlayoutDelay(Time delay) {
               << delay.GetMilliSeconds() << "ms" << std::endl;
 }
 
+void FramePlayoutManager::SetFPS(uint32_t fps) {
+    if (fps > 0) {
+        fps_ = fps;
+        NS_LOG_INFO("FramePlayoutManager: FPS set to " << fps);
+        std::cout << "[FramePlayoutManager] FPS set to " << fps << std::endl;
+    }
+}
+
 void FramePlayoutManager::SetSkipFrameCallback(SkipFrameCallback cb) {
     skip_frame_callback_ = cb;
     NS_LOG_INFO("FramePlayoutManager: Skip frame callback registered");
+}
+
+void FramePlayoutManager::SetPacketReceivedCallback(PacketReceivedCallback cb) {
+    packet_received_callback_ = cb;
+    NS_LOG_INFO("FramePlayoutManager: Packet received callback registered");
+}
+
+void FramePlayoutManager::SetFrameCompleteCallback(FrameCompleteCallback cb) {
+    frame_complete_callback_ = cb;
+    NS_LOG_INFO("FramePlayoutManager: Frame complete callback registered");
 }
 
 FrameStatistics& FramePlayoutManager::GetOrCreateFrame(uint32_t frame_id) {
@@ -71,37 +91,21 @@ void FramePlayoutManager::OnPacketReceived(const FramePacketInfo& info, uint32_t
     Time now = Simulator::Now();
     uint32_t frame_id = info.frame_id;
     
-    // 检查是否正在跳帧，如果是则忽略跳过范围内的帧
-    if (skip_frame_pending_ && frame_id < skip_target_frame_id_) {
-        NS_LOG_DEBUG("FramePlayoutManager: Ignoring packet for skipped frame " << frame_id);
-        return;
-    }
-    
     // 获取或创建帧统计
     FrameStatistics& frame = GetOrCreateFrame(frame_id);
     
     // 更新帧统计
     frame.frame_size += packet_size;
     frame.packets_received++;
-    frame.rtp_timestamp = info.rtp_timestamp;
     
     // 第一个包到达时
     if (info.is_first_packet || frame.packets_received == 1) {
         frame.send_time = MilliSeconds(info.send_time_ms);
         frame.first_packet_recv_time = now;
         
-        // 设置播放截止时间
-        frame.playout_deadline = frame.send_time + playout_delay_;
-        
-        // 调度截止时间检查
-        Time time_until_deadline = frame.playout_deadline - now;
-        if (time_until_deadline > Time(0)) {
-            ScheduleDeadlineCheck(frame_id, frame.playout_deadline);
-        }
-        
         NS_LOG_DEBUG("FramePlayoutManager: Frame " << frame_id 
                      << " first packet, send_time=" << frame.send_time.GetMilliSeconds()
-                     << "ms, deadline=" << frame.playout_deadline.GetMilliSeconds() << "ms");
+                     << "ms");
     }
     
     // 记录关键帧
@@ -109,6 +113,11 @@ void FramePlayoutManager::OnPacketReceived(const FramePacketInfo& info, uint32_t
         frame.is_keyframe = true;
         RecordKeyFrame(frame_id);
         NS_LOG_INFO("FramePlayoutManager: Keyframe detected - frame_id=" << frame_id);
+    }
+    
+    // 触发包接收回调
+    if (packet_received_callback_) {
+        packet_received_callback_(info, frame);
     }
     
     // 最后一个包到达时（marker bit）
@@ -131,93 +140,58 @@ void FramePlayoutManager::MarkFrameComplete(uint32_t frame_id) {
     
     Time now = Simulator::Now();
     
-    // 检查是否按时完成
-    if (now <= frame.playout_deadline && !frame.skipped) {
+    if (frame_id == 0) {
+        // 第一帧到达，建立基准
+        first_frame_playout_time_ = now;
+        baseline_established_ = true;
+        frame.playout_deadline = now;
         frame.played_on_time = true;
-        on_time_frames_++;
-        NS_LOG_INFO("FramePlayoutManager: Frame " << frame_id 
-                    << " completed on time at " << now.GetMilliSeconds() << "ms"
-                    << " (deadline: " << frame.playout_deadline.GetMilliSeconds() << "ms)");
+        on_time_frames_++; // Frame 0 always on time by definition
+        
+        NS_LOG_INFO("FramePlayoutManager: Frame 0 baseline established at " << now.GetMilliSeconds() << "ms");
+        
+        // 更新所有其他帧的截止时间
+        for (auto& pair : frames_) {
+            if (pair.first != 0) {
+                 double offset = (double)pair.first / fps_;
+                 pair.second.playout_deadline = first_frame_playout_time_ + Seconds(offset);
+                 
+                 // 如果该帧之前已经完成，重新评估其是否按时
+                 if (pair.second.is_complete) {
+                     bool was_on_time = pair.second.played_on_time;
+                     // 按时播放判定：完成时间 <= 截止时间
+                     pair.second.played_on_time = (pair.second.receive_complete_time <= pair.second.playout_deadline);
+                     
+                     if (!was_on_time && pair.second.played_on_time) on_time_frames_++;
+                     else if (was_on_time && !pair.second.played_on_time) on_time_frames_--;
+                 }
+            }
+        }
     } else {
-        frame.played_on_time = false;
-        NS_LOG_INFO("FramePlayoutManager: Frame " << frame_id 
-                    << " completed LATE at " << now.GetMilliSeconds() << "ms"
-                    << " (deadline: " << frame.playout_deadline.GetMilliSeconds() << "ms)");
+        if (baseline_established_) {
+             double offset = (double)frame_id / fps_;
+             frame.playout_deadline = first_frame_playout_time_ + Seconds(offset);
+             frame.played_on_time = (now <= frame.playout_deadline);
+             if (frame.played_on_time) on_time_frames_++;
+        } else {
+            // Frame 0还没到，暂时无法确定截止时间
+            frame.playout_deadline = Seconds(0);
+            frame.played_on_time = false; 
+        }
     }
     
-    // 清除跳帧状态如果已到达目标帧
-    if (skip_frame_pending_ && frame_id >= skip_target_frame_id_ && frame.is_keyframe) {
-        skip_frame_pending_ = false;
-        NS_LOG_INFO("FramePlayoutManager: Skip frame completed, arrived at keyframe " << frame_id);
+    // 触发帧完成回调
+    if (frame_complete_callback_) {
+        frame_complete_callback_(frame);
     }
 }
 
 void FramePlayoutManager::ScheduleDeadlineCheck(uint32_t frame_id, Time deadline) {
-    Time now = Simulator::Now();
-    Time delay = deadline - now;
-    
-    if (delay > Time(0)) {
-        Simulator::Schedule(delay, &FramePlayoutManager::CheckFrameDeadline, this, frame_id);
-    }
+    // 逻辑移除：不再调度超时检查，等待所有帧自然完成（或不完成）
 }
 
 void FramePlayoutManager::CheckFrameDeadline(uint32_t frame_id) {
-    auto it = frames_.find(frame_id);
-    if (it == frames_.end()) return;
-    
-    FrameStatistics& frame = it->second;
-    
-    // 如果帧已完成或已跳过，不需要处理
-    if (frame.is_complete || frame.skipped) {
-        return;
-    }
-    
-    Time now = Simulator::Now();
-    
-    // 帧超时，需要跳帧
-    if (now > frame.playout_deadline) {
-        frame.played_on_time = false;
-        frame.skipped = true;
-        skipped_frames_++;
-        
-        NS_LOG_WARN("FramePlayoutManager: Frame " << frame_id 
-                    << " TIMEOUT at " << now.GetMilliSeconds() << "ms"
-                    << " (deadline: " << frame.playout_deadline.GetMilliSeconds() << "ms)"
-                    << " - packets received: " << frame.packets_received);
-        
-        std::cout << "[FramePlayoutManager] Frame " << frame_id << " TIMEOUT! "
-                  << "Received " << frame.packets_received << " packets, "
-                  << "deadline was " << frame.playout_deadline.GetMilliSeconds() << "ms"
-                  << std::endl;
-        
-        // 找到下一个关键帧
-        uint32_t next_keyframe = FindNextKeyFrame(frame_id);
-        
-        if (next_keyframe != UINT32_MAX) {
-            // 标记中间的所有帧为跳过
-            for (uint32_t fid = frame_id; fid < next_keyframe; fid++) {
-                auto& f = GetOrCreateFrame(fid);
-                if (!f.is_complete && !f.skipped) {
-                    f.skipped = true;
-                    f.played_on_time = false;
-                    skipped_frames_++;
-                }
-            }
-            
-            skip_frame_pending_ = true;
-            skip_target_frame_id_ = next_keyframe;
-            
-            std::cout << "[FramePlayoutManager] Skipping to keyframe " << next_keyframe 
-                      << std::endl;
-            
-            // 通知发送端跳帧
-            if (skip_frame_callback_) {
-                skip_frame_callback_(next_keyframe);
-            }
-        } else {
-            NS_LOG_WARN("FramePlayoutManager: No keyframe found after frame " << frame_id);
-        }
-    }
+    // 逻辑移除
 }
 
 uint32_t FramePlayoutManager::FindNextKeyFrame(uint32_t from_frame_id) {
@@ -246,26 +220,43 @@ void FramePlayoutManager::ExportFrameTrace(const std::string& filename) {
         return;
     }
     
-    // CSV头
+    // CSV头 - 移除了rtp_timestamp和skipped
     file << "frame_id,frame_size_bytes,send_time_ms,first_recv_time_ms,"
-         << "receive_complete_time_ms,playout_deadline_ms,rtp_timestamp,"
-         << "is_keyframe,is_complete,played_on_time,skipped,packets_received"
+         << "receive_complete_time_ms,playout_deadline_ms,"
+         << "is_keyframe,is_complete,played_on_time,packets_received"
          << std::endl;
     
     // 按frame_id排序输出
     for (const auto& pair : frames_) {
         const FrameStatistics& f = pair.second;
+        
+        // 处理 receive_complete_time_ms 输出逻辑
+        double recv_complete_ms = f.receive_complete_time.GetMilliSeconds();
+        
+        if (f.frame_id != 0) {
+            // 除第一帧外，如果没有在deadline之前收完，显示-1
+            // 只要没完成，或者完成时间超过deadline，都显示-1
+            // 注意：is_complete为1表示收完了所有包，无论时间。
+            // 但显示时间时，题目要求：如果超过deadline，标记为-1。
+            if (!f.is_complete) {
+                recv_complete_ms = -1;
+            } else if (baseline_established_ && f.receive_complete_time > f.playout_deadline) {
+                recv_complete_ms = -1;
+            }
+        } else {
+            // 第一帧
+            if (!f.is_complete) recv_complete_ms = -1;
+        }
+
         file << f.frame_id << ","
              << f.frame_size << ","
              << f.send_time.GetMilliSeconds() << ","
              << f.first_packet_recv_time.GetMilliSeconds() << ","
-             << f.receive_complete_time.GetMilliSeconds() << ","
+             << recv_complete_ms << ","
              << f.playout_deadline.GetMilliSeconds() << ","
-             << f.rtp_timestamp << ","
              << (f.is_keyframe ? 1 : 0) << ","
              << (f.is_complete ? 1 : 0) << ","
              << (f.played_on_time ? 1 : 0) << ","
-             << (f.skipped ? 1 : 0) << ","
              << f.packets_received
              << std::endl;
     }
@@ -280,22 +271,19 @@ void FramePlayoutManager::PrintStatistics() {
     std::cout << "\n========== Frame Playout Statistics ==========" << std::endl;
     std::cout << "Total frames:     " << total_frames_ << std::endl;
     std::cout << "Completed frames: " << completed_frames_ << std::endl;
-    std::cout << "Skipped frames:   " << skipped_frames_ << std::endl;
     std::cout << "On-time frames:   " << on_time_frames_ << std::endl;
     
     if (total_frames_ > 0) {
         double completion_rate = 100.0 * completed_frames_ / total_frames_;
-        double skip_rate = 100.0 * skipped_frames_ / total_frames_;
         double on_time_rate = completed_frames_ > 0 ? 
                               100.0 * on_time_frames_ / completed_frames_ : 0;
         
         std::cout << std::fixed << std::setprecision(2);
         std::cout << "Completion rate:  " << completion_rate << "%" << std::endl;
-        std::cout << "Skip rate:        " << skip_rate << "%" << std::endl;
         std::cout << "On-time rate:     " << on_time_rate << "%" << std::endl;
     }
     
-    std::cout << "Playout delay:    " << playout_delay_.GetMilliSeconds() << "ms" << std::endl;
+    std::cout << "Playout delay:    " << playout_delay_.GetMilliSeconds() << "ms (IGNORED)" << std::endl;
     std::cout << "Keyframes recorded: " << keyframe_ids_.size() << std::endl;
     std::cout << "==============================================" << std::endl;
 }
@@ -306,8 +294,9 @@ void FramePlayoutManager::Reset() {
     current_playback_frame_ = 0;
     total_frames_ = 0;
     completed_frames_ = 0;
-    skipped_frames_ = 0;
     on_time_frames_ = 0;
+    baseline_established_ = false;
+    first_frame_playout_time_ = Seconds(0);
     skip_frame_pending_ = false;
     skip_target_frame_id_ = UINT32_MAX;
     

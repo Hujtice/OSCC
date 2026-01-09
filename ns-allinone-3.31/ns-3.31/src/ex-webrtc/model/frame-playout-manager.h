@@ -31,8 +31,8 @@ struct FrameStatistics {
     FrameStatistics()
         : frame_id(0), frame_size(0), send_time(Seconds(0)), 
           first_packet_recv_time(Seconds(0)), receive_complete_time(Seconds(0)),
-          playout_deadline(Seconds(0)), rtp_timestamp(0), is_keyframe(false),
-          is_complete(false), played_on_time(true), skipped(false),
+          playout_deadline(Seconds(0)), is_keyframe(false),
+          is_complete(false), played_on_time(true),
           packets_received(0), marker_received(false) {}
 };
 
@@ -41,6 +41,10 @@ class FramePlayoutManager {
 public:
     // 跳帧回调类型：参数为目标关键帧ID
     typedef std::function<void(uint32_t)> SkipFrameCallback;
+    // 包接收回调类型
+    typedef std::function<void(const FramePacketInfo&, const FrameStatistics&)> PacketReceivedCallback;
+    // 帧完成回调类型
+    typedef std::function<void(const FrameStatistics&)> FrameCompleteCallback;
     
     FramePlayoutManager();
     ~FramePlayoutManager();
@@ -48,12 +52,18 @@ public:
     // 配置播放延迟参数
     void SetPlayoutDelay(Time delay);
     Time GetPlayoutDelay() const { return playout_delay_; }
+
+    // 设置帧率
+    void SetFPS(uint32_t fps);
+    uint32_t GetFPS() const { return fps_; }
     
     // 处理接收到的包
     void OnPacketReceived(const FramePacketInfo& info, uint32_t packet_size);
     
-    // 设置跳帧回调（通知发送端）
+    // 设置回调
     void SetSkipFrameCallback(SkipFrameCallback cb);
+    void SetPacketReceivedCallback(PacketReceivedCallback cb);
+    void SetFrameCompleteCallback(FrameCompleteCallback cb);
     
     // 输出CSV trace
     void ExportFrameTrace(const std::string& filename);
@@ -61,7 +71,6 @@ public:
     // 获取统计信息
     uint32_t GetTotalFrames() const { return total_frames_; }
     uint32_t GetCompletedFrames() const { return completed_frames_; }
-    uint32_t GetSkippedFrames() const { return skipped_frames_; }
     uint32_t GetOnTimeFrames() const { return on_time_frames_; }
     
     // 打印统计摘要
@@ -91,17 +100,21 @@ private:
     
     // 成员变量
     Time playout_delay_;                              // 播放延迟参数
+    uint32_t fps_;                                    // 帧率
+    Time first_frame_playout_time_;                   // 第一帧实际播放时间（截止时间）
+    bool baseline_established_;                       // 第一帧基准是否已建立
     std::map<uint32_t, FrameStatistics> frames_;      // 帧统计映射
     std::deque<uint32_t> keyframe_ids_;               // 关键帧ID列表（有序）
     uint32_t current_playback_frame_;                 // 当前播放帧ID
     
-    // 跳帧回调
+    // 回调函数
     SkipFrameCallback skip_frame_callback_;
+    PacketReceivedCallback packet_received_callback_;
+    FrameCompleteCallback frame_complete_callback_;
     
     // 统计计数器
     uint32_t total_frames_;
     uint32_t completed_frames_;
-    uint32_t skipped_frames_;
     uint32_t on_time_frames_;
     
     // 跳帧状态

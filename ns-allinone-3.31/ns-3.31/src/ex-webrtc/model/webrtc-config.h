@@ -21,7 +21,7 @@ class WebrtcSessionManager{
 public:
     WebrtcSessionManager(webrtc::TimeController *controller,
                         uint32_t min_rate,uint32_t start_rate,uint32_t max_rate,
-                        uint32_t height,uint32_t width);
+                        uint32_t height,uint32_t width, uint32_t fps=30);
     ~WebrtcSessionManager();
     void CreateClients();
 private:

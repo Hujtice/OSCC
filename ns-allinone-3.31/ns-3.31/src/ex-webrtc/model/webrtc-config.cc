@@ -21,13 +21,15 @@ const float kDefaultPacingRate = 2.5f;
 }
 WebrtcSessionManager::WebrtcSessionManager(webrtc::TimeController *controller,
                         uint32_t min_rate,uint32_t start_rate,uint32_t max_rate,
-                        uint32_t height,uint32_t width):time_controller_(controller){
+                        uint32_t height,uint32_t width, uint32_t fps):time_controller_(controller){
     call_client_config_.transport.rates.min_rate=webrtc::DataRate::KilobitsPerSec(min_rate);
     call_client_config_.transport.rates.start_rate=webrtc::DataRate::KilobitsPerSec(start_rate);
     call_client_config_.transport.rates.max_rate=webrtc::DataRate::KilobitsPerSec(max_rate);
     
     video_stream_config_.source.generator.height=height; 
     video_stream_config_.source.generator.width=width;
+    video_stream_config_.source.framerate = fps;
+    video_stream_config_.encoder.max_framerate = fps;
 
     webrtc::GoogCcFactoryConfig config;
     config.feedback_only = true;

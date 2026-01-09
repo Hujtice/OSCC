@@ -305,7 +305,7 @@ public:
 // 修改：使用固定loss_rate参数，因为实际loss值从trace中读取
 void RunSingleTraceSimulation(const std::string& trace_file, int index, int total, 
                              double bandwidth_scale_factor = 1.0, double loss_rate = 0.01,
-                             const std::string& video_trace_file = "", bool oscc_mode = false) {
+                             bool oscc_mode = false, uint32_t fps = 30) {
     std::string instance_name = ExtractInstanceName(trace_file);
     char current_dir[PATH_MAX];
     if (getcwd(current_dir, sizeof(current_dir)) == NULL) {
@@ -316,9 +316,9 @@ void RunSingleTraceSimulation(const std::string& trace_file, int index, int tota
     std::cout << "=== DEBUG: RunSingleTraceSimulation Parameters ===" << std::endl;
     std::cout << "  Instance: " << instance_name << std::endl;
     std::cout << "  Trace file: " << trace_file << std::endl;
-    std::cout << "  Video trace file: " << (video_trace_file.empty() ? "none" : video_trace_file) << std::endl;
     std::cout << "  Progress: " << (index + 1) << "/" << total << std::endl;
     std::cout << "  OSCC mode: " << (oscc_mode ? "ENABLED" : "disabled") << std::endl;
+    std::cout << "  FPS: " << fps << std::endl;
     if (oscc_mode) {
         std::cout << "  Initial μ: " << bandwidth_scale_factor << " (will be dynamically adjusted)" << std::endl;
     } else {
@@ -343,14 +343,11 @@ void RunSingleTraceSimulation(const std::string& trace_file, int index, int tota
     
     // 构建命令行 - 使用 webrtc-TFMN(QoE) 程序
     // 注意：loss_rate参数仍然传递给程序，但代码会从trace文件中读取实际的loss值
-    std::string command = "./waf --run \"scratch/webrtc-TFMN(QoE) --m=simu --topo=change --it=" + 
+    std::string command = "python3.10 ./waf --run \"scratch/webrtc-TFMN(QoE) --m=simu --topo=change --it=" + 
                          instance_name + " --trace=" + trace_file + 
-                         " --mb=5 --ls=" + std::to_string(loss_rate) + " --mu=" + std::to_string(bandwidth_scale_factor);
+                         " --mb=5 --ls=" + std::to_string(loss_rate) + " --mu=" + std::to_string(bandwidth_scale_factor) +
+                         " --fps=" + std::to_string(fps);
     
-    // 如果指定了视频trace文件，添加到命令行
-    if (!video_trace_file.empty()) {
-        command += " --video_trace=" + video_trace_file;
-    }
     
     // 如果启用OSCC模式，添加 --oscc 参数
     if (oscc_mode) {
@@ -434,15 +431,15 @@ void RunSingleTraceSimulation(const std::string& trace_file, int index, int tota
 
 // 批量运行不同带宽缩放系数的仿真（仅带宽缩放，不包含loss率）
 void RunBatchBandwidthScaling(const std::string& trace_file, const std::vector<double>& scale_factors, 
-                             double loss_rate = 0.01, const std::string& video_trace_file = "") {
+                             double loss_rate = 0.01, uint32_t fps = 30) {
     std::string instance_name = ExtractInstanceName(trace_file);
     
     std::cout << "================================================" << std::endl;
     std::cout << "BANDWIDTH SCALING BATCH PROCESSING" << std::endl;
     std::cout << "Trace file: " << trace_file << std::endl;
-    std::cout << "Video trace file: " << (video_trace_file.empty() ? "none" : video_trace_file) << std::endl;
     std::cout << "Instance name: " << instance_name << std::endl;
     std::cout << "Loss rate parameter (固定): " << loss_rate << " (注: 实际loss值从trace文件读取)" << std::endl;
+    std::cout << "FPS: " << fps << std::endl;
     std::cout << "Scale factors to test: ";
     for (double factor : scale_factors) {
         std::cout << factor << " ";
@@ -460,7 +457,7 @@ void RunBatchBandwidthScaling(const std::string& trace_file, const std::vector<d
         std::cout << "RUN " << (i + 1) << "/" << total_runs << " with μ=" << scale_factors[i] << ", L=" << loss_rate << std::endl;
         
         try {
-            RunSingleTraceSimulation(trace_file, i, total_runs, scale_factors[i], loss_rate, video_trace_file);
+            RunSingleTraceSimulation(trace_file, i, total_runs, scale_factors[i], loss_rate, false, fps);
             successful_runs++;
             
             // 在运行之间添加延迟
@@ -487,7 +484,6 @@ void RunBatchBandwidthScaling(const std::string& trace_file, const std::vector<d
     std::cout << "BANDWIDTH SCALING BATCH COMPLETED" << std::endl;
     std::cout << "================================================" << std::endl;
     std::cout << "Trace file: " << trace_file << std::endl;
-    std::cout << "Video trace file: " << (video_trace_file.empty() ? "none" : video_trace_file) << std::endl;
     std::cout << "Loss rate parameter (固定): " << loss_rate << std::endl;
     std::cout << "Total runs: " << total_runs << std::endl;
     std::cout << "Successful runs: " << successful_runs << std::endl;
@@ -512,7 +508,7 @@ void RunBatchBandwidthScaling(const std::string& trace_file, const std::vector<d
 // 不再需要批量测试不同loss率
 
 // 自定义批量处理 - 只进行带宽缩放，不进行loss率测试
-void RunCustomBatchProcessing(const std::vector<std::string>& trace_files, const std::string& video_trace_file = "") {
+void RunCustomBatchProcessing(const std::vector<std::string>& trace_files, uint32_t fps = 30) {
     // 修改：只保留带宽缩放系数，移除loss值数组
     // std::vector<double> custom_mu_values  = {0.5,0.52,0.54,0.56,0.58,0.6,0.62,0.64,0.66,0.68,0.7,0.72,0.74,0.76,0.78,0.8,0.82,0.84,0.86,0.88,0.9,0.92,0.94,0.96,0.98, 1.0,1.02,1.04,1.06,1.08, 1.1, 1.12, 1.14, 1.16, 1.18,1.2,1.22,1.24,1.26,1.28,1.30,1.32,1.34,1.36,1.38,1.4,1.42,1.44,1.46,1.48,1.5};
     std::vector<double> custom_mu_values={0.5,0.6,1.0,1.2};
@@ -521,11 +517,11 @@ void RunCustomBatchProcessing(const std::vector<std::string>& trace_files, const
     
     std::cout << "=== CUSTOM BATCH PROCESSING STARTED ===" << std::endl;
     std::cout << "Total trace files: " << trace_files.size() << std::endl;
-    std::cout << "Video trace file: " << (video_trace_file.empty() ? "none" : video_trace_file) << std::endl;
     std::cout << "Mu values to test: ";
     for (double mu : custom_mu_values) std::cout << mu << " ";
     std::cout << std::endl;
     std::cout << "Loss rate (固定参数): " << fixed_loss_rate << " (注: 实际loss值从trace文件读取)" << std::endl;
+    std::cout << "FPS: " << fps << std::endl;
     std::cout << "Total parameter combinations: " << custom_mu_values.size() << std::endl;
     std::cout << "Total simulations: " << (trace_files.size() * custom_mu_values.size()) << std::endl;
     std::cout << "======================================" << std::endl;
@@ -543,11 +539,10 @@ void RunCustomBatchProcessing(const std::vector<std::string>& trace_files, const
         for (double mu : custom_mu_values) {
             std::cout << "\n*** PROCESSING COMBINATION " << (completed+1) << "/" << total_simulations << " ***" << std::endl;
             std::cout << "File: " << (file_idx+1) << "/" << trace_files.size() << " - " << trace_file << std::endl;
-            std::cout << "Video trace: " << (video_trace_file.empty() ? "none" : video_trace_file) << std::endl;
             std::cout << "Parameters: μ=" << mu << ", L=" << fixed_loss_rate << " (固定参数)" << std::endl;
             
             try {
-                RunSingleTraceSimulation(trace_file, completed, total_simulations, mu, fixed_loss_rate, video_trace_file);
+                RunSingleTraceSimulation(trace_file, completed, total_simulations, mu, fixed_loss_rate, false, fps);
                 successful++;
                 std::cout << "*** SUCCESS: Combination " << (completed+1) << " completed ***" << std::endl;
             } catch (const std::exception& e) {
@@ -569,7 +564,6 @@ void RunCustomBatchProcessing(const std::vector<std::string>& trace_files, const
     double total_duration = difftime(end_time, start_time);
     
     std::cout << "\n=== CUSTOM BATCH PROCESSING COMPLETED ===" << std::endl;
-    std::cout << "Video trace file used: " << (video_trace_file.empty() ? "none" : video_trace_file) << std::endl;
     std::cout << "Fixed loss rate parameter: " << fixed_loss_rate << std::endl;
     std::cout << "Successful: " << successful << "/" << total_simulations << std::endl;
     std::cout << "Failed: " << failed << "/" << total_simulations << std::endl;
@@ -582,7 +576,6 @@ void ShowUsage(const std::string& program_name) {
     std::cout << "Usage: " << program_name << " [OPTIONS]" << std::endl;
     std::cout << "Options:" << std::endl;
     std::cout << "  --dir <directory>    Specify trace directory" << std::endl;
-    std::cout << "  --video_trace <file> Specify video trace file for frame analysis" << std::endl;
     std::cout << "  --ext <extensions>   File extensions to process (comma-separated)" << std::endl;
     std::cout << "  --all                Process all files in directory" << std::endl;
     std::cout << "  --mu <factors>       Bandwidth scale factors to test (comma-separated)" << std::endl;
@@ -608,7 +601,6 @@ void ShowUsage(const std::string& program_name) {
 
 int main(int argc, char *argv[]) {
     std::string trace_directory = "/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans";
-    std::string video_trace_file = "";  // 新增：视频trace文件参数
     std::vector<std::string> extensions = {".log", ".txt", ".dat", ".trace", ".bw"};
     bool process_all_files = false;
     std::string single_trace_file = "";
@@ -617,14 +609,13 @@ int main(int argc, char *argv[]) {
     std::vector<double> bandwidth_scale_factors = {1.0};
     double fixed_loss_rate = 0.01;  // 固定loss_rate参数，实际loss从trace文件读取
     bool oscc_mode = false;  // OSCC模式：启用动态μ调整
+    uint32_t fps = 30; // 默认帧率
     
     // 解析命令行参数
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "--dir" && i + 1 < argc) {
             trace_directory = argv[++i];
-        } else if (arg == "--video_trace" && i + 1 < argc) {  // 新增参数
-            video_trace_file = argv[++i];
         } else if (arg == "--oscc") {  // OSCC模式
             oscc_mode = true;
             // bandwidth_scale_factors = {1.0};  // OSCC模式下，初始μ=1.0，后续动态调整
@@ -664,6 +655,12 @@ int main(int argc, char *argv[]) {
                 fixed_loss_rate = std::stod(argv[++i]);
             } catch (const std::exception& e) {
                 std::cerr << "Invalid loss rate: " << argv[i] << std::endl;
+            }
+        } else if (arg == "--fps" && i + 1 < argc) {
+            try {
+                fps = std::stoul(argv[++i]);
+            } catch (const std::exception& e) {
+                std::cerr << "Invalid fps: " << argv[i] << std::endl;
             }
         } else if (arg == "--single" && i + 1 < argc) {
             single_trace_file = argv[++i];
@@ -705,6 +702,7 @@ int main(int argc, char *argv[]) {
     } else {
         std::cout << "重要更新: Loss值从trace文件读取，仅进行带宽缩放测试" << std::endl;
     }
+    std::cout << "FPS: " << fps << std::endl;
     std::cout << "================================================" << std::endl;
     
     if (!single_trace_file.empty()) {
@@ -713,12 +711,6 @@ int main(int argc, char *argv[]) {
         std::cout << "Trace directory: " << trace_directory << std::endl;
     }
     
-    if (!video_trace_file.empty()) {
-        std::cout << "Video trace file: " << video_trace_file << std::endl;
-        std::cout << "Video trace analysis: ENABLED" << std::endl;
-    } else {
-        std::cout << "Video trace analysis: DISABLED" << std::endl;
-    }
     
     std::cout << "Bandwidth scale factors to test: ";
     for (double factor : bandwidth_scale_factors) {
@@ -781,7 +773,7 @@ int main(int argc, char *argv[]) {
             try {
                 // OSCC模式：初始μ=1.0，通过oscc_mode=true启用动态调整
                 RunSingleTraceSimulation(trace_file, file_index, trace_files.size(), 
-                                       1.0, fixed_loss_rate, video_trace_file, true);  // oscc_mode=true
+                                       1.0, fixed_loss_rate, true, fps);  // oscc_mode=true
                 successful_runs++;
                 
                 if (file_index < trace_files.size() - 1) {
@@ -804,8 +796,8 @@ int main(int argc, char *argv[]) {
         std::cout << "==========================================" << std::endl;
         
     } else if (use_custom_params) {
-        // 使用自定义批量处理函数，传递视频trace文件参数
-        RunCustomBatchProcessing(trace_files, video_trace_file);
+        // 使用自定义批量处理函数
+        RunCustomBatchProcessing(trace_files, fps);
     } else {
         // 修改：仅进行带宽缩放批处理
         int total_simulations = trace_files.size() * bandwidth_scale_factors.size();
@@ -819,14 +811,14 @@ int main(int argc, char *argv[]) {
             
             if (bandwidth_scale_factors.size() > 1) {
                 // 仅进行带宽缩放批处理
-                RunBatchBandwidthScaling(trace_file, bandwidth_scale_factors, fixed_loss_rate, video_trace_file);
+                RunBatchBandwidthScaling(trace_file, bandwidth_scale_factors, fixed_loss_rate, fps);
                 completed_simulations += bandwidth_scale_factors.size();
                 successful_runs += bandwidth_scale_factors.size();
             } else {
                 // 单个参数运行
                 try {
                     RunSingleTraceSimulation(trace_file, file_index, trace_files.size(), 
-                                           bandwidth_scale_factors[0], fixed_loss_rate, video_trace_file, false);  // oscc_mode=false
+                                           bandwidth_scale_factors[0], fixed_loss_rate, false, fps);  // oscc_mode=false
                     successful_runs++;
                     completed_simulations++;
                     
@@ -913,4 +905,6 @@ int main(int argc, char *argv[]) {
 // 重定向输出到webrtc_ns3.log文件
 // ./waf --run "scratch/webrtc-FMN-TFMN(QoE) --oscc --dir /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/ --all --video_trace /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/video_trace/AsianCup_China_Uzbekistan/frame_trace_0" > webrtc_ns3.log 2>&1
 
-//./waf --run "scratch/webrtc-FMN-TFMN(QoE) --oscc --dir /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/ --all " > webrtc_ns3.log 2>&1
+
+//1.9
+// ./waf --run "scratch/webrtc-TFMN(QoE) --trace=/home/hjt/OSCC/ns-3.31/traces/AItrans/AItrans_0.log --ls=0.01 --oscc=true --folder=trace_results/AItrans_test --it=AItrans_case1" > webrtc_ns3.log 2>&1
