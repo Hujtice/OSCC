@@ -33,6 +33,9 @@
 #include "test/scenario/hardware_codecs.h"
 #include "test/testsupport/file_utils.h"
 
+#include "modules/rtp_rtcp/source/rtcp_packet.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/pli.h"
+
 namespace webrtc {
 namespace test {
 constexpr size_t CallTest2::kNumSsrcs;
@@ -505,6 +508,37 @@ void SendVideoStream2::UpdateActiveLayers(std::vector<bool> active_layers) {
       for (size_t i = 0; i < encoder_config.simulcast_layers.size(); ++i)
         encoder_config.simulcast_layers[i].active = active_layers[i];
       send_stream_->ReconfigureVideoEncoder(std::move(encoder_config));
+    }
+  });
+}
+
+void SendVideoStream2::ForceKeyFrame() {
+  sender_->task_queue_.PostTask([this] {
+    rtc::CritScope cs(&crit_);
+    // Method 1: If using FakeEncoders (kFake), control them directly.
+    if (!fake_encoders_.empty()) {
+        for (auto* encoder : fake_encoders_) {
+            encoder->ForceKeyFrame();
+        }
+        return;
+    }
+    
+    // Method 2: If using Real Encoders (kSoftware/kHardware), simulate an RTCP PLI.
+    // This tells the sender (internal VideoSendStream) to generate a KeyFrame.
+    for (uint32_t ssrc : ssrcs_) {
+        webrtc::rtcp::Pli pli;
+        pli.SetSenderSsrc(CallTest2::kReceiverLocalVideoSsrc);
+        pli.SetMediaSsrc(ssrc);
+        auto packet = pli.Build();
+
+        webrtc::EmulatedIpPacket emu_packet(
+            rtc::SocketAddress(), rtc::SocketAddress(),
+            rtc::CopyOnWriteBuffer(packet.data(), packet.size()),
+            sender_->clock_->CurrentTime(),
+            0
+        );
+        // Inject packet into sender as if received from network
+        sender_->OnPacketReceived(std::move(emu_packet));
     }
   });
 }

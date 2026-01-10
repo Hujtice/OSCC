@@ -43,6 +43,11 @@ class FakeEncoder : public VideoEncoder {
   void SetMaxBitrate(int max_kbps);
   void SetQp(int qp);
 
+  void ForceKeyFrame() {
+    rtc::CritScope cs(&crit_sect_);
+    pending_keyframe_ = true;
+  }
+
   void SetFecControllerOverride(
       FecControllerOverride* fec_controller_override) override;
 

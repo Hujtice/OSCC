@@ -297,7 +297,12 @@ std::unique_ptr<RTPFragmentationHeader> FakeH264Encoder::EncodeHook(
   }
   auto fragmentation = std::make_unique<RTPFragmentationHeader>();
 
-  if (current_idr_counter % kIdrFrequency == 0 &&
+  // 关键修复：根据 encoded_image->_frameType 来决定是否生成 IDR
+  // 而不是仅仅依赖 idr_counter_ % kIdrFrequency
+  bool is_keyframe = (encoded_image->_frameType == VideoFrameType::kVideoFrameKey);
+  bool periodic_idr = (current_idr_counter % kIdrFrequency == 0);
+
+  if ((is_keyframe || periodic_idr) &&
       encoded_image->size() > kSpsSize + kPpsSize + 1) {
     const size_t kNumSlices = 3;
     fragmentation->VerifyAndAllocateFragmentationHeader(kNumSlices);

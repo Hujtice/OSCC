@@ -2206,11 +2206,13 @@ static void InstallWebrtcApplication(Ptr<Node> sender,
                         double bandwidth_scale_factor = 1.0,
                         double loss_rate = 0.01,
                         BandwidthChanger* bandwidth_changer = nullptr,
-                        FramePlayoutManager* frame_playout_manager = nullptr)
+                        FramePlayoutManager* frame_playout_manager = nullptr,
+                        bool skip_frame_enabled = false)
 {
     std::cout << "\n[DEBUG] InstallWebrtcApplication called" << std::endl;
     std::cout << "  Bandwidth scale factor: " << bandwidth_scale_factor << std::endl;
     std::cout << "  Loss rate: " << loss_rate << std::endl;
+    std::cout << "  Skip frame enabled: " << (skip_frame_enabled ? "YES" : "NO") << std::endl;
     
     NS_LOG_INFO("Installing WebRTC application with RL state management and real frame analysis");
     
@@ -2221,7 +2223,9 @@ static void InstallWebrtcApplication(Ptr<Node> sender,
     // ============ 集成 FramePlayoutManager ============
     if (frame_playout_manager && recvApp) {
         recvApp->SetFramePlayoutManager(frame_playout_manager);
-        std::cout << "[DEBUG] FramePlayoutManager set in WebrtcReceiver" << std::endl;
+        // 设置跳帧开关
+        frame_playout_manager->SetSkipFrameEnabled(skip_frame_enabled);
+        std::cout << "[DEBUG] FramePlayoutManager set in WebrtcReceiver with skip_enabled=" << skip_frame_enabled << std::endl;
         
         // 设置跳帧回调：当接收端触发跳帧时，通知发送端
         if (sendApp) {
@@ -2425,7 +2429,8 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
                      double loss_rate = 0.01,
                      bool oscc_mode = false,
                      uint32_t fps = 30,
-                     const std::string& frame_trace_output = "")
+                     const std::string& frame_trace_output = "",
+                     bool skip_frame_enabled = false)
 {
     std::cout << "\n=== test_app_on_p2p started with Real Video Frame Analysis ===" << std::endl;
     std::cout << "Instance: " << instance << std::endl;
@@ -2436,6 +2441,7 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
     std::cout << "Bandwidth scale factor μ: " << bandwidth_scale_factor << std::endl;
     std::cout << "Loss rate: " << loss_rate << std::endl;
     std::cout << "FPS: " << fps << std::endl;
+    std::cout << "Skip frame: " << (skip_frame_enabled ? "ENABLED" : "DISABLED") << std::endl;
     
     NS_ASSERT(startapptime == 0.0);
     
@@ -2601,7 +2607,8 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
                 sesssion_manager.at(i).get(), trace, 
                 qoe_managers[i].get(), rl_managers[i].get(), 
                 bandwidth_scale_factor, loss_rate, changer,
-                frame_playout_managers[i].get());
+                frame_playout_managers[i].get(),
+                skip_frame_enabled);
         
         sendPort++;
         recvPort++;
@@ -2692,7 +2699,8 @@ void run_single_trace_simulation(const std::string& trace_file, const std::strin
                                double bandwidth_scale_factor=1.0, 
                                bool oscc_mode = false,
                                uint32_t fps = 30,
-                               const std::string& frame_trace_output = "")
+                               const std::string& frame_trace_output = "",
+                               bool skip_frame_enabled = false)
 {
     std::cout << "\n==========================================" << std::endl;
     std::cout << "Starting simulation for: " << trace_file << std::endl;
@@ -2706,6 +2714,7 @@ void run_single_trace_simulation(const std::string& trace_file, const std::strin
         std::cout << "Bandwidth scale factor μ: " << bandwidth_scale_factor << std::endl;
     }
     std::cout << "FPS: " << fps << std::endl;
+    std::cout << "Skip frame: " << (skip_frame_enabled ? "ENABLED" : "DISABLED") << std::endl;
     std::cout << "Frame trace output: " << (frame_trace_output.empty() ? "auto-generated" : frame_trace_output) << std::endl;
     std::cout << "Base output folder: " << base_output_folder << std::endl;
     std::cout << "==========================================" << std::endl;
@@ -2786,7 +2795,7 @@ void run_single_trace_simulation(const std::string& trace_file, const std::strin
     test_app_on_p2p(instance, controller_type, num, startapptime, endapptime, 
                    max_bandwith, triggerloss.get(), changer.get(), trace_file, 
                    bandwidth_scale_factor, loss_rate, oscc_mode,
-                   fps, frame_trace_output);
+                   fps, frame_trace_output, skip_frame_enabled);
     
     std::cout << "Simulation completed successfully" << std::endl;
     
@@ -2816,15 +2825,16 @@ int main(int argc, char *argv[]){
     std::string topo("change");
     std::string instance("default_instance");
     std::string trace_file(""); 
-    std::string frame_weight("1920");//分辨率  360*640 480*800 720*1280 1080*1920 1440*2560 2160*3840
-    std::string frame_height("1080");//
-    std::string max_bandwidth("5");
+    std::string frame_weight("1280");//分辨率  360*640 480*800 720*1280 1080*1920 1440*2560 2160*3840
+    std::string frame_height("720");//
+    std::string max_bandwidth("10");
     std::string loss_rate("0.01");
     std::string folder("trace_results");
     std::string bandwidth_scale("1.0");//mu
     std::string oscc_enabled("false");  // OSCC模式：动态μ调整
     std::string fps_str("30"); // 帧率参数
     std::string frame_trace_output("");  // 帧trace输出文件路径
+    std::string skip_frame_str("false"); // 跳帧参数
     
     // 解析命令行参数
     CommandLine cmd;
@@ -2839,11 +2849,14 @@ int main(int argc, char *argv[]){
     cmd.AddValue("oscc", "enable OSCC dynamic mu adjustment", oscc_enabled);  // OSCC参数
     cmd.AddValue("frame_trace", "frame trace output file path", frame_trace_output);
     cmd.AddValue("fps", "frame rate", fps_str);
+    cmd.AddValue("skip", "enable skip frame logic", skip_frame_str);
     
     cmd.Parse(argc, argv);
     
     // 解析OSCC模式
     bool oscc_mode = (oscc_enabled == "true" || oscc_enabled == "1" || oscc_enabled == "yes");
+    // 解析跳帧模式
+    bool skip_frame_enabled = (skip_frame_str == "true" || skip_frame_str == "1" || skip_frame_str == "yes");
     
     // 验证必要参数
     if (trace_file.empty()) {
@@ -2902,11 +2915,12 @@ int main(int argc, char *argv[]){
         std::cout << "Bandwidth scale factor μ: " << mu << std::endl;
     }
     std::cout << "FPS: " << fps << std::endl;
+    std::cout << "Skip frame: " << (skip_frame_enabled ? "ENABLED" : "DISABLED") << std::endl;
     std::cout << "Frame trace output: " << frame_trace_output << std::endl;
     
     // 使用run_single_trace_simulation函数
     run_single_trace_simulation(trace_file, instance, controller_type, 1, mb, ls, folder, mu, oscc_mode,
-                               fps, frame_trace_output);
+                               fps, frame_trace_output, skip_frame_enabled);
     
     std::cout << "=== WebRTC TraceAll-Frame with Real Frame Analysis Completed Successfully ===" << std::endl;
     

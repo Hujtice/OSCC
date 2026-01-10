@@ -24,6 +24,7 @@ public:
                         uint32_t height,uint32_t width, uint32_t fps=30);
     ~WebrtcSessionManager();
     void CreateClients();
+    void GenerateKeyFrame();
 private:
     friend class WebrtcSender;
     friend class WebrtcReceiver;

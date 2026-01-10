@@ -50,6 +50,10 @@ WebrtcSender::WebrtcSender(WebrtcSessionManager *manager){
     m_seq = 0;
     m_bandwidth_scale_factor = 1.0; // 默认1.0
 
+    m_skip_target_frame_id = UINT32_MAX;
+    m_force_keyframe_frame_id = UINT32_MAX;
+    m_skip_frame_active = false;
+
     m_last_applied_scaled_bw = 0;
     m_pending_scaled_bw = 0;
     m_has_pending_bw = false;
@@ -210,13 +214,15 @@ uint32_t WebrtcSender::GetOrCreateFrameId(uint32_t rtp_timestamp) {
     // 新的RTP时间戳，分配新的帧ID
     uint32_t frame_id = m_nextFrameId++;
     m_rtpTimestampToFrameId[rtp_timestamp] = frame_id;
-    
-    // 清理旧的映射（保留最近100个帧的映射）
-    if (m_rtpTimestampToFrameId.size() > 100) {
-        auto oldest = m_rtpTimestampToFrameId.begin();
-        m_rtpTimestampToFrameId.erase(oldest);
+    m_rtpTimestampOrder.push_back(rtp_timestamp);  // 记录插入顺序
+
+    // 清理旧的映射（保留最近100个帧的映射，按插入顺序清理）
+    while (m_rtpTimestampToFrameId.size() > 100 && !m_rtpTimestampOrder.empty()) {
+        uint32_t oldest_ts = m_rtpTimestampOrder.front();
+        m_rtpTimestampOrder.pop_front();
+        m_rtpTimestampToFrameId.erase(oldest_ts);
     }
-    
+
     return frame_id;
 }
 
@@ -238,27 +244,29 @@ uint32_t WebrtcSender::GetOrCreateFrameId(uint32_t rtp_timestamp) {
 // P=0 表示关键帧，P=1 表示inter frame
 bool WebrtcSender::IsVP8KeyFrame(const uint8_t* payload, size_t payload_length) {
     if (payload_length < 1) return false;
-    
+
     // VP8 payload descriptor 第一字节
     uint8_t desc = payload[0];
     bool has_extension = (desc & 0x80) != 0;  // X bit
     bool is_start = (desc & 0x10) != 0;       // S bit (start of partition)
-    
+
     // 只有在分区开始时才能判断关键帧
     if (!is_start) {
         return false;  // 不是分区开始，无法确定
     }
-    
+
     int header_size = 1;
-    
+
     if (has_extension && payload_length > 1) {
         uint8_t ext = payload[1];
         header_size++;
         if ((ext & 0x80) != 0) {  // I bit (picture ID present)
-            header_size++;
-            if (payload_length > header_size && (payload[2] & 0x80) != 0) {
-                // 16-bit picture ID
+            if (payload_length > (size_t)header_size) {
                 header_size++;
+                if ((payload[header_size - 1] & 0x80) != 0) {
+                    // 16-bit picture ID (M bit set)
+                    header_size++;
+                }
             }
         }
         if ((ext & 0x40) != 0) {  // L bit (TL0PICIDX present)
@@ -268,15 +276,53 @@ bool WebrtcSender::IsVP8KeyFrame(const uint8_t* payload, size_t payload_length) 
             header_size++;
         }
     }
-    
+
     if (payload_length <= (size_t)header_size) {
         return false;
     }
-    
+
     // VP8 uncompressed data chunk - 检查 P bit (bit 0)
     // P=0 表示关键帧
+    // FakeVp8Encoder 写入: payload[0] = key_frame ? 0 : 0x01
     uint8_t vp8_header = payload[header_size];
-    return (vp8_header & 0x01) == 0;
+    bool is_keyframe = (vp8_header & 0x01) == 0;
+
+    // 调试输出
+    if (is_keyframe) {
+        NS_LOG_INFO("WebrtcSender: VP8 KeyFrame detected! header_size=" << header_size
+                    << ", vp8_header=0x" << std::hex << (int)vp8_header << std::dec);
+    }
+
+    return is_keyframe;
+}
+
+// 检测H.264关键帧 (IDR)
+bool WebrtcSender::IsH264KeyFrame(const uint8_t* payload, size_t payload_length) {
+    if (payload_length < 1) return false;
+    
+    // NALU Header: F|NRI|Type
+    uint8_t nal_header = payload[0];
+    uint8_t type = nal_header & 0x1F;
+    
+    // Type 5: IDR NAL unit
+    if (type == 5) {
+        return true;
+    }
+    
+    // Type 28: FU-A
+    if (type == 28) {
+        if (payload_length < 2) return false;
+        uint8_t fu_header = payload[1];
+        // FU Header: S|E|R|Type
+        bool is_start = (fu_header & 0x80) != 0;
+        uint8_t fu_type = fu_header & 0x1F;
+        
+        if (is_start && fu_type == 5) {
+            return true;
+        }
+    }
+    
+    return false;
 }
 
 // 解析RTP包获取帧信息
@@ -350,23 +396,27 @@ RtpFrameInfo WebrtcSender::ParseRtpPacketInfo(const uint8_t* packet, size_t leng
     info.rtp_timestamp = rtp_timestamp;
     info.frame_id = GetOrCreateFrameId(rtp_timestamp);
     info.is_last_packet = marker ? 1 : 0;
-    
-    // 检测是否是帧的第一个包（RTP timestamp变化时）
-    if (rtp_timestamp != m_lastRtpTimestamp) {
-        info.is_first_packet = 1;
-        m_lastRtpTimestamp = rtp_timestamp;
-    } else {
-        info.is_first_packet = 0;
-    }
-    
-    // VP8 关键帧检测 (payload_type 通常是 96-127 范围内的动态类型)
-    // WebRTC 默认使用 VP8，payload_type 通常是 96 或其他配置值
-    if (payload_length > 0 && info.is_first_packet) {
-        info.is_keyframe = IsVP8KeyFrame(payload, payload_length) ? 1 : 0;
-    } else {
-        // 非第一个包继承之前的关键帧状态（通过frame_id查找）
-        // 简化处理：只在第一个包确定关键帧状态
-        info.is_keyframe = 0;
+
+    // 检测是否是帧的第一个包
+    // 优先使用 Generic codec 的 payload header 中的 kFirstPacketBit (bit 1)
+    // 这比基于 m_lastRtpTimestamp 变化更可靠，尤其在重传场景下
+    info.is_first_packet = 0;
+    info.is_keyframe = 0;
+
+    if (payload_length > 0) {
+        uint8_t generic_header = payload[0];
+        // 检查 kFirstPacketBit (bit 1 = 0x02): 首包标志
+        if (generic_header & 0x02) {
+            info.is_first_packet = 1;
+            // 检查 kKeyFrameBit (bit 0 = 0x01): 关键帧标志（只在首包时检查）
+            if (generic_header & 0x01) {
+                info.is_keyframe = 1;
+                NS_LOG_INFO("WebrtcSender: Generic KeyFrame detected! header=0x"
+                            << std::hex << (int)generic_header << std::dec);
+                std::cout << "[WebrtcSender] Generic KeyFrame detected for frame " << info.frame_id
+                          << ", header=0x" << std::hex << (int)generic_header << std::dec << std::endl;
+            }
+        }
     }
     
     NS_LOG_INFO("WebrtcSender: Parsed RTP - frame_id=" << info.frame_id 
@@ -428,6 +478,37 @@ bool WebrtcSender::SendRtp(const uint8_t* packet,
     // 解析RTP包获取帧信息
     RtpFrameInfo frame_info = ParseRtpPacketInfo(packet, length);
 
+        // ============ 跳帧逻辑 ============
+        if (m_skip_frame_active) {
+            if (frame_info.frame_id < m_force_keyframe_frame_id) {
+                // 丢弃旧帧（目标帧之前的帧）
+                return true;
+            } 
+            // 目标帧或更新的帧：
+            // 不再强制标记 frame_info.is_keyframe = 1。
+            // 我们依赖底层的编码器响应 ForceKeyFrame/PLI 请求生成的真实关键帧。
+            // 如果编码器还没有生成关键帧（比如延迟），这帧会被FramePlayoutManager丢弃。
+            
+            // 检查是否已经是关键帧（由 ParseRtpPacketInfo 解析得出）
+            if (frame_info.is_keyframe) {
+                 if (frame_info.is_first_packet) {
+                     NS_LOG_INFO("WebrtcSender: Real KeyFrame " << frame_info.frame_id 
+                                << " detected during skip recovery.");
+                     std::cout << "[WebrtcSender] Real KeyFrame " << frame_info.frame_id 
+                               << " detected (Recovery)." << std::endl;
+                 }
+                 // 如果是关键帧，且是最后一包，说明恢复帧发送完毕
+                 if (frame_info.is_last_packet) {
+                     m_skip_frame_active = false;
+                     NS_LOG_INFO("WebrtcSender: Skip active state cleared.");
+                 }
+            } else {
+                // 虽然 ID >= target，但不是关键帧。
+                // 这可能是编码器响应滞后产生的 Delta 帧。
+                // 我们照常发送，交给接收端去丢弃（接收端在 skip 状态下只收关键帧）。
+            }
+        }
+        // ================================
     {
         rtc::CopyOnWriteBuffer buffer(packet,length);
         LockScope ls(&m_rtpLock);
@@ -821,6 +902,7 @@ void WebrtcSender::SkipToFrame(uint32_t target_frame_id) {
     
     // 2. 设置跳帧目标
     m_skip_target_frame_id = target_frame_id;
+    m_force_keyframe_frame_id = target_frame_id; // 强制下一帧(target)为关键帧
     m_skip_frame_active = true;
     
     // 3. 请求编码器生成新的关键帧
@@ -860,7 +942,7 @@ void WebrtcSender::RequestKeyFrame() {
     // WebRTC 的 Call 接口可能支持 RequestKeyFrame，但在仿真环境中
     // 视频编码器是模拟的，所以这里主要是记录日志
     
-    if (m_call) {
+    if (m_call && m_manager) {
         // 尝试通过 transport controller 或其他接口请求关键帧
         // 注：真实 WebRTC 中可以通过以下方式请求：
         // - call->SignalChannelNetworkState() 触发网络状态变化
@@ -869,9 +951,9 @@ void WebrtcSender::RequestKeyFrame() {
         std::cout << "[WebrtcSender] RequestKeyFrame: requesting key frame from encoder" << std::endl;
         NS_LOG_INFO("WebrtcSender: Requesting key frame from encoder");
         
-        // 在仿真环境中，关键帧请求会自动由视频 trace 处理
-        // 因为我们是基于预录制的视频 trace 进行仿真
-        // 跳帧后，FrameManager 会自动从目标关键帧开始处理
+        // 调用SessionManager生成关键帧
+        m_manager->GenerateKeyFrame();
+        
     } else {
         std::cout << "[WebrtcSender] RequestKeyFrame: WARNING - m_call is null!" << std::endl;
         NS_LOG_WARN("WebrtcSender: Cannot request key frame - m_call is null");

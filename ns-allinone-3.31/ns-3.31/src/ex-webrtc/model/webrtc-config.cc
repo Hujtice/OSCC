@@ -75,6 +75,13 @@ void WebrtcSessionManager::CreateStreamPair(){
       video_streams_.emplace_back(
       new webrtc::test::VideoStreamPair2(sender_client_,receiver_client_, video_stream_config_));
 }
+void WebrtcSessionManager::GenerateKeyFrame() {
+    for (auto& stream_pair : video_streams_) {
+        if (stream_pair->send()) {
+            stream_pair->send()->ForceKeyFrame();
+        }
+    }
+}
 void WebrtcSessionManager::Start(){
   m_running=true;
   for (auto& stream_pair : video_streams_)

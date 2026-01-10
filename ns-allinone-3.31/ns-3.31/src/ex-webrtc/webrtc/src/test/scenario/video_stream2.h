@@ -70,6 +70,7 @@ class SendVideoStream2 {
   void Stop();
   void UpdateConfig(std::function<void(VideoStreamConfig*)> modifier);
   void UpdateActiveLayers(std::vector<bool> active_layers);
+  void ForceKeyFrame();
   bool UsingSsrc(uint32_t ssrc) const;
   bool UsingRtxSsrc(uint32_t ssrc) const;
 

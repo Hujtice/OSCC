@@ -259,6 +259,7 @@ private:
     
     // 跳帧相关成员变量
     uint32_t m_skip_target_frame_id{UINT32_MAX};  // 跳帧目标
+    uint32_t m_force_keyframe_frame_id{UINT32_MAX}; // 强制作为关键帧发送的帧ID
     bool m_skip_frame_active{false};              // 是否正在执行跳帧
 
     static const uint32_t BANDWIDTH_CHECK_INTERVAL_MS = 100;
@@ -274,6 +275,7 @@ private:
     
     // RTP时间戳到帧ID的映射（用于生成递增的帧ID）
     std::map<uint32_t, uint32_t> m_rtpTimestampToFrameId;
+    std::deque<uint32_t> m_rtpTimestampOrder;  // 按插入顺序记录RTP时间戳（用于LRU清理）
     uint32_t m_nextFrameId{0};  // 下一个分配的帧ID
     uint32_t m_lastRtpTimestamp{0};  // 上一个RTP时间戳
     
@@ -281,6 +283,7 @@ private:
     RtpFrameInfo ParseRtpPacketInfo(const uint8_t* packet, size_t length);
     uint32_t GetOrCreateFrameId(uint32_t rtp_timestamp);
     bool IsVP8KeyFrame(const uint8_t* payload, size_t payload_length);
+    bool IsH264KeyFrame(const uint8_t* payload, size_t payload_length);
 };   
 }
 
