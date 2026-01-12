@@ -11,6 +11,7 @@
 #include <cmath>
 #include <numeric>
 #include <deque>
+#include <random>
 #include "ns3/webrtc-defines.h"
 #include "ns3/core-module.h"
 #include "ns3/applications-module.h"
@@ -113,18 +114,26 @@ struct TraceData {
 
 // ============================================================================
 // OSCCController 类 - OSCC算法核心控制器
-// 实现HAFA启发式算法的动态μ调整机制
+// 实现基于Rt的精细化历史查表机制进行动态μ调整
 // ============================================================================
 class OSCCController {
 public:
-    // μ变化记录结构
+    // 历史状态记录结构 (用于 HistoryMap)
+    struct RtHistoryEntry {
+        double mu;
+        double recorded_loss;
+        
+        RtHistoryEntry(double m = 1.0, double l = 0.01) : mu(m), recorded_loss(l) {}
+    };
+    
+    // μ变化记录结构 (用于日志输出)
     struct MuChangeRecord {
         Time timestamp;
         uint32_t frame_id;
         uint32_t Rt_value;
         double old_mu;
         double new_mu;
-        std::string trigger_type;  // "intra_frame" 或 "inter_frame"
+        std::string trigger_type;  // "rt_lookup"
         double loss_rate;
         double qoe;
         
@@ -158,18 +167,20 @@ public:
                           qoe_delay(0.0), qoe_loss(0.0), qoe_ddl(0.0), qoe(0.0),
                           mu(1.0), timestamp(Seconds(0)) {}
     };
+    
+    // 滑动窗口大小常量
+    static const size_t LOSS_WINDOW_SIZE = 100;
 
     OSCCController() 
-        : epsilon_(0.02), mu_min_(0.5), mu_max_(1.5), current_mu_(1.0),
-          last_frame_qoe_(0.0), last_frame_max_rt_(0), current_frame_id_(0),
-          oscc_enabled_(true), total_adjustments_(0) {
+        : epsilon_(0.02), mu_min_(0.5), mu_max_(1.5),
+          current_frame_id_(0), oscc_enabled_(true), total_adjustments_(0) {
         NS_LOG_INFO("OSCCController initialized: epsilon=" << epsilon_ 
                    << ", mu_range=[" << mu_min_ << ", " << mu_max_ << "]");
-        std::cout << "=== OSCCController Initialized ===" << std::endl;
+        std::cout << "=== OSCCController Initialized (Rt-based Lookup) ===" << std::endl;
         std::cout << "  epsilon: " << epsilon_ << std::endl;
         std::cout << "  mu_range: [" << mu_min_ << ", " << mu_max_ << "]" << std::endl;
-        std::cout << "  initial_mu: " << current_mu_ << std::endl;
-        std::cout << "==================================" << std::endl;
+        std::cout << "  loss_window_size: " << LOSS_WINDOW_SIZE << std::endl;
+        std::cout << "=================================================" << std::endl;
     }
     
     // 设置OSCC参数
@@ -177,11 +188,10 @@ public:
         epsilon_ = epsilon;
         mu_min_ = mu_min;
         mu_max_ = mu_max;
-        current_mu_ = ClipMu(initial_mu);
         
         NS_LOG_INFO("OSCCController parameters set: epsilon=" << epsilon_ 
                    << ", mu_range=[" << mu_min_ << ", " << mu_max_ << "]"
-                   << ", initial_mu=" << current_mu_);
+                   << ", initial_mu=" << initial_mu);
     }
     
     // 启用/禁用OSCC
@@ -192,62 +202,78 @@ public:
     
     bool IsEnabled() const { return oscc_enabled_; }
     
-    // 获取当前μ值（供每个包使用）
-    double GetMuForPacket(uint32_t frame_id, uint32_t Rt) {
-        if (!oscc_enabled_) {
-            return current_mu_;
-        }
-        
-        // 记录当前帧ID
-        if (frame_id != current_frame_id_) {
-            // 新帧开始，保存上一帧的Rt-Loss映射
-            if (current_frame_id_ > 0 || !current_frame_rt_loss_.empty()) {
-                last_frame_rt_loss_ = current_frame_rt_loss_;
-                last_frame_max_rt_ = 0;
-                last_frame_min_rt_ = UINT32_MAX;  // 初始化为最大值
-                for (const auto& pair : last_frame_rt_loss_) {
-                    if (pair.first > last_frame_max_rt_) {
-                        last_frame_max_rt_ = pair.first;
-                    }
-                    if (pair.first < last_frame_min_rt_) {
-                        last_frame_min_rt_ = pair.first;
-                    }
-                }
-                // 如果没有记录，重置min_rt为0
-                if (last_frame_min_rt_ == UINT32_MAX) {
-                    last_frame_min_rt_ = 0;
-                }
-            }
-            current_frame_rt_loss_.clear();
-            current_frame_id_ = frame_id;
-            
-            NS_LOG_DEBUG("OSCC: New frame " << frame_id << " started, last_frame_max_rt="
-                        << last_frame_max_rt_ << ", last_frame_min_rt=" << last_frame_min_rt_);
-        }
-        
-        NS_LOG_DEBUG("OSCC: GetMuForPacket frame=" << frame_id << ", Rt=" << Rt 
-                    << ", current_mu=" << current_mu_);
-        
-        return current_mu_;
+    // ============================================================================
+    // 滑动窗口丢包率相关方法
+    // ============================================================================
+    
+    // 获取当前滑动窗口的丢包率
+    double GetCurrentWindowLoss() const {
+        if (loss_window_.empty()) return 0.01;  // 默认值
+        size_t lost = std::count(loss_window_.begin(), loss_window_.end(), true);
+        return static_cast<double>(lost) / loss_window_.size();
     }
     
-    // Rt组完成时调用（帧内调整）
+    // 更新滑动窗口 (RTCP 反馈时调用)
+    void UpdateLossWindow(bool packet_lost) {
+        loss_window_.push_back(packet_lost);
+        while (loss_window_.size() > LOSS_WINDOW_SIZE) {
+            loss_window_.pop_front();
+        }
+    }
+    
+    // ============================================================================
+    // 核心查表逻辑 - 基于Rt的mu决策
+    // ============================================================================
+    
+    // 获取当前μ值（供每个包使用）- 基于Rt查表机制
+    double GetMuForPacket(uint32_t frame_id, uint32_t Rt) {
+        if (!oscc_enabled_) {
+            return 1.0;  // 禁用时返回默认值
+        }
+        
+        // 帧边界检测：新帧开始时更新 HistoryMap
+        if (frame_id != current_frame_id_) {
+            OnNewFrameStart(frame_id);
+        }
+        
+        // 步骤 A: 检查帧内缓存
+        auto cache_it = current_frame_cache_.find(Rt);
+        if (cache_it != current_frame_cache_.end()) {
+            NS_LOG_DEBUG("OSCC: Cache hit for Rt=" << Rt << ", mu=" << cache_it->second);
+            return cache_it->second;  // 缓存命中
+        }
+        
+        // 步骤 B: 计算新 mu
+        double L_curr = GetCurrentWindowLoss();
+        double new_mu = CalculateMuFromHistory(Rt, L_curr);
+        
+        // 记录mu变化（用于日志）
+        RecordMuChange(frame_id, Rt, new_mu, L_curr);
+        
+        // 存入缓存
+        current_frame_cache_[Rt] = new_mu;
+        
+        // 应用新mu到发送端
+        ApplyMuToSender(new_mu);
+        
+        NS_LOG_DEBUG("OSCC: GetMuForPacket frame=" << frame_id << ", Rt=" << Rt 
+                    << ", L_curr=" << L_curr << ", new_mu=" << new_mu);
+        
+        return new_mu;
+    }
+    
+    // Rt组完成时调用 - 新架构下不再需要此方法进行mu调整，保留用于兼容性
     void OnRtGroupComplete(uint32_t frame_id, uint32_t Rt, double group_loss) {
         if (!oscc_enabled_) {
             return;
         }
         
-        // 记录当前帧的Rt-Loss
-        current_frame_rt_loss_[Rt] = group_loss;
-        
-        // 执行帧内μ调整
-        AdjustMuIntraFrame(frame_id, Rt, group_loss);
-        
-        NS_LOG_INFO("OSCC: Rt group complete - frame=" << frame_id << ", Rt=" << Rt 
-                   << ", loss=" << group_loss << ", new_mu=" << current_mu_);
+        // 仅记录日志，不再进行mu调整（mu已在GetMuForPacket中确定）
+        NS_LOG_DEBUG("OSCC: Rt group complete - frame=" << frame_id << ", Rt=" << Rt 
+                   << ", loss=" << group_loss);
     }
     
-    // 帧完成时调用（帧间调整）
+    // 帧完成时调用 - 仅记录统计信息
     void OnFrameComplete(uint32_t frame_id, double frame_qoe,
                       double bandwidth_utilization, double loss_rate,
                       double delay_metric, double delay_avg, double ddl_miss_rate,
@@ -257,34 +283,35 @@ public:
             return;
         }
         
-        // 执行帧间μ调整
-        AdjustMuInterFrame(frame_id, frame_qoe);
-        
-        // 保存当前帧QoE详细信息
+        // 保存当前帧QoE详细信息（仅用于统计，不影响mu调整）
         FrameQoEDetail detail;
         detail.frame_id = frame_id;
         detail.bandwidth_utilization = bandwidth_utilization;
         detail.loss_rate = loss_rate;
         detail.delay_metric = delay_metric;
-        detail.delay_avg = delay_avg;  // 新增：保存平均延迟
+        detail.delay_avg = delay_avg;
         detail.ddl_miss_rate = ddl_miss_rate;
         detail.qoe_recv = qoe_recv;
         detail.qoe_delay = qoe_delay;
         detail.qoe_loss = qoe_loss;
         detail.qoe_ddl = qoe_ddl;
         detail.qoe = frame_qoe;
-        detail.mu = current_mu_;
+        detail.mu = GetCurrentMu();  // 获取最近使用的mu
         detail.timestamp = Simulator::Now();
         
         frame_qoe_details_[frame_id] = detail;
         frame_qoe_history_[frame_id] = frame_qoe;
         
-        NS_LOG_INFO("OSCC: Frame complete - frame=" << frame_id << ", QoE=" << frame_qoe 
-                   << ", new_mu=" << current_mu_);
+        NS_LOG_INFO("OSCC: Frame complete - frame=" << frame_id << ", QoE=" << frame_qoe);
     }
     
-    // 获取当前μ
-    double GetCurrentMu() const { return current_mu_; }
+    // 获取当前μ（返回最近使用的mu，用于日志/统计）
+    double GetCurrentMu() const {
+        if (current_frame_cache_.empty()) {
+            return history_map_.empty() ? 1.0 : history_map_.begin()->second.mu;
+        }
+        return current_frame_cache_.begin()->second;
+    }
     
     // 获取μ变化记录
     const std::vector<MuChangeRecord>& GetMuChangeRecords() const {
@@ -355,113 +382,173 @@ public:
     // 获取统计信息
     uint32_t GetTotalAdjustments() const { return total_adjustments_; }
     
-private:
-    // 帧内μ调整（同一Rt组丢包率对比）
-    void AdjustMuIntraFrame(uint32_t frame_id, uint32_t Rt, double current_loss) {
-        double old_mu = current_mu_;
-        bool adjusted = false;
-        
-        auto it = last_frame_rt_loss_.find(Rt);
-        if (it != last_frame_rt_loss_.end()) {
-            // 存在历史记录，对比丢包率
-            double last_loss = it->second;
-            if (current_loss < last_loss) {
-                // 丢包率降低，表现更好，可以更激进
-                current_mu_ += epsilon_;
-                adjusted = true;
-                NS_LOG_DEBUG("OSCC Intra-frame: loss improved (" << last_loss << " -> " 
-                            << current_loss << "), mu increased");
-            } else if (current_loss > last_loss) {
-                // 丢包率升高，表现更差，需要更保守
-                current_mu_ -= epsilon_;
-                adjusted = true;
-                NS_LOG_DEBUG("OSCC Intra-frame: loss degraded (" << last_loss << " -> " 
-                            << current_loss << "), mu decreased");
-            }
-            // 丢包率相同则不调整
-        } else if (last_frame_max_rt_ > 0 || last_frame_min_rt_ > 0) {
-            // 新出现的Rt组（上一帧没有此Rt），根据Rt范围决定调整方向
-            if (Rt > last_frame_max_rt_) {
-                // Rt大于上一帧最大Rt，探索性增加μ
-                current_mu_ += epsilon_;
-                adjusted = true;
-                NS_LOG_DEBUG("OSCC Intra-frame: new high Rt group (Rt=" << Rt 
-                            << " > last_max=" << last_frame_max_rt_ << "), mu increased");
-            } else if (Rt < last_frame_min_rt_) {
-                // Rt小于上一帧最小Rt，保守性减小μ
-                current_mu_ -= epsilon_;
-                adjusted = true;
-                NS_LOG_DEBUG("OSCC Intra-frame: new low Rt group (Rt=" << Rt 
-                            << " < last_min=" << last_frame_min_rt_ << "), mu decreased");
-            }
-            // Rt介于上一帧最小和最大之间，不调整
-        }
-        
-        // 约束μ在有效范围内
-        current_mu_ = ClipMu(current_mu_);
-        
-        // 记录μ变化
-        if (adjusted && old_mu != current_mu_) {
-            total_adjustments_++;
-            MuChangeRecord record(Simulator::Now(), frame_id, Rt, old_mu, current_mu_,
-                                 "intra_frame", current_loss, 0.0);
-            mu_change_records_.push_back(record);
-            
-            std::cout << "[OSCC] Intra-frame adjustment: frame=" << frame_id 
-                     << ", Rt=" << Rt << ", mu: " << old_mu << " -> " << current_mu_
-                     << ", loss=" << current_loss << std::endl;
-            
-            // 关键修复：直接应用新μ值到WebrtcSender
-            ApplyMuToSender(current_mu_);
-        }
+    // ============================================================================
+    // 发送端 Rt 预估
+    // ============================================================================
+    
+    // 设置用于 Rt 预估的参数
+    void SetRtEstimationParams(Time rtt, double bandwidth_bps) {
+        estimated_rtt_ = rtt;
+        estimated_bandwidth_bps_ = bandwidth_bps;
     }
     
-    // 帧间μ调整（QoE对比）
-    void AdjustMuInterFrame(uint32_t frame_id, double current_qoe) {
-        double old_mu = current_mu_;
-        bool adjusted = false;
+    // 设置帧截止时间（由发送端帧管理器调用）
+    void SetCurrentFrameDeadline(Time deadline) {
+        current_frame_deadline_ = deadline;
+    }
+    
+    // 发送端预估 Rt（在发包前调用）
+    uint32_t EstimateRt(uint32_t packet_size) {
+        Time now = Simulator::Now();
+        Time T_remain = current_frame_deadline_ - now;
         
-        // 首帧不调整，只记录QoE
-        if (frame_id == 0 || last_frame_qoe_ == 0.0) {
-            last_frame_qoe_ = current_qoe;
-            NS_LOG_DEBUG("OSCC Inter-frame: first frame, recording QoE=" << current_qoe);
-            return;
+        if (T_remain <= Seconds(0) || estimated_bandwidth_bps_ <= 0) {
+            return 0;
         }
         
-        if (current_qoe > last_frame_qoe_) {
-            // QoE提升，可以更激进
-            current_mu_ += epsilon_;
-            adjusted = true;
-            NS_LOG_DEBUG("OSCC Inter-frame: QoE improved (" << last_frame_qoe_ << " -> " 
-                        << current_qoe << "), mu increased");
-        } else if (current_qoe < last_frame_qoe_) {
-            // QoE下降，需要更保守
-            current_mu_ -= epsilon_;
-            adjusted = true;
-            NS_LOG_DEBUG("OSCC Inter-frame: QoE degraded (" << last_frame_qoe_ << " -> " 
-                        << current_qoe << "), mu decreased");
+        double send_time_s = (packet_size * 8.0) / estimated_bandwidth_bps_;
+        Time available = T_remain - Seconds(send_time_s);
+        
+        if (available <= Seconds(0) || estimated_rtt_ <= Seconds(0)) {
+            return 0;
         }
-        // QoE相同则不调整
         
-        // 约束μ在有效范围内
-        current_mu_ = ClipMu(current_mu_);
+        uint32_t Rt = static_cast<uint32_t>(available.GetSeconds() / estimated_rtt_.GetSeconds());
         
-        // 更新上一帧QoE
-        last_frame_qoe_ = current_qoe;
+        NS_LOG_DEBUG("OSCC EstimateRt: T_remain=" << T_remain.GetSeconds() 
+                    << "s, send_time=" << send_time_s << "s, RTT=" << estimated_rtt_.GetSeconds()
+                    << "s, Rt=" << Rt);
         
-        // 记录μ变化
-        if (adjusted && old_mu != current_mu_) {
+        return Rt;
+    }
+    
+    // 便捷方法：预估 Rt 并获取对应的 mu
+    double GetMuForPacketWithEstimation(uint32_t frame_id, uint32_t packet_size) {
+        uint32_t Rt = EstimateRt(packet_size);
+        return GetMuForPacket(frame_id, Rt);
+    }
+    
+private:
+    // ============================================================================
+    // 核心查表算法
+    // ============================================================================
+    
+    // 根据历史计算 mu
+    double CalculateMuFromHistory(uint32_t Rt, double L_curr) {
+        if (history_map_.empty()) {
+            NS_LOG_DEBUG("OSCC: HistoryMap empty, using default mu=1.0");
+            return 1.0;  // 初始默认值
+        }
+        
+        auto it = history_map_.find(Rt);
+        
+        // 情况 1: 精确命中
+        if (it != history_map_.end()) {
+            double new_mu = AdjustMuByLoss(it->second.mu, it->second.recorded_loss, L_curr);
+            NS_LOG_DEBUG("OSCC: Exact match for Rt=" << Rt 
+                        << ", L_prev=" << it->second.recorded_loss 
+                        << ", L_curr=" << L_curr << ", mu: " << it->second.mu << " -> " << new_mu);
+            return new_mu;
+        }
+        
+        // 获取历史 Rt 范围
+        uint32_t min_rt = history_map_.begin()->first;
+        uint32_t max_rt = history_map_.rbegin()->first;
+        
+        // 情况 2: 大于最大值 (激进策略)
+        if (Rt > max_rt) {
+            double mu_max_hist = history_map_.rbegin()->second.mu;
+            double new_mu = ClipMu(mu_max_hist + epsilon_);
+            NS_LOG_DEBUG("OSCC: Rt=" << Rt << " > max_rt=" << max_rt 
+                        << ", aggressive: mu " << mu_max_hist << " -> " << new_mu);
+            return new_mu;
+        }
+        
+        // 情况 3: 小于最小值 (保守策略)
+        if (Rt < min_rt) {
+            double mu_min_hist = history_map_.begin()->second.mu;
+            double new_mu = ClipMu(mu_min_hist - epsilon_);
+            NS_LOG_DEBUG("OSCC: Rt=" << Rt << " < min_rt=" << min_rt 
+                        << ", conservative: mu " << mu_min_hist << " -> " << new_mu);
+            return new_mu;
+        }
+        
+        // 情况 4: 位于区间内，找 lower_bound 邻居
+        auto lower = history_map_.lower_bound(Rt);
+        if (lower != history_map_.begin()) {
+            --lower;  // 找到比 Rt 小的最大邻居
+            double new_mu = AdjustMuByLoss(lower->second.mu, lower->second.recorded_loss, L_curr);
+            NS_LOG_DEBUG("OSCC: Rt=" << Rt << " in range, neighbor Rt=" << lower->first 
+                        << ", L_prev=" << lower->second.recorded_loss 
+                        << ", L_curr=" << L_curr << ", mu: " << lower->second.mu << " -> " << new_mu);
+            return new_mu;
+        }
+        
+        NS_LOG_DEBUG("OSCC: Fallback to default mu=1.0");
+        return 1.0;  // 回退默认值
+    }
+    
+    // 根据丢包率变化调整 mu
+    double AdjustMuByLoss(double mu_prev, double L_prev, double L_curr) {
+        if (L_curr < L_prev) {
+            return ClipMu(mu_prev + epsilon_);  // 情况变好，更激进
+        } else if (L_curr > L_prev) {
+            return ClipMu(mu_prev - epsilon_);  // 情况变差，更保守
+        }
+        return mu_prev;  // 相等，保持不变
+    }
+    
+    // 帧边界处理：用当前帧缓存替换历史表
+    void OnNewFrameStart(uint32_t new_frame_id) {
+        // 用当前帧缓存替换历史表
+        if (!current_frame_cache_.empty()) {
+            history_map_.clear();
+            double L_curr = GetCurrentWindowLoss();
+            for (const auto& entry : current_frame_cache_) {
+                history_map_[entry.first] = RtHistoryEntry(entry.second, L_curr);
+            }
+            
+            NS_LOG_DEBUG("OSCC: Frame " << current_frame_id_ << " -> " << new_frame_id 
+                        << ", updated HistoryMap with " << history_map_.size() << " entries");
+            
+            std::cout << "[OSCC] New frame " << new_frame_id << " started, HistoryMap updated with " 
+                      << history_map_.size() << " Rt entries from frame " << current_frame_id_ << std::endl;
+        }
+        
+        // 清空缓存，准备新帧
+        current_frame_cache_.clear();
+        current_frame_id_ = new_frame_id;
+    }
+    
+    // 记录mu变化（用于日志输出）
+    void RecordMuChange(uint32_t frame_id, uint32_t Rt, double new_mu, double loss_rate) {
+        // 获取旧的mu值用于记录
+        double old_mu = 1.0;
+        auto hist_it = history_map_.find(Rt);
+        if (hist_it != history_map_.end()) {
+            old_mu = hist_it->second.mu;
+        } else if (!history_map_.empty()) {
+            // 尝试找到邻居的mu
+            auto lower = history_map_.lower_bound(Rt);
+            if (lower != history_map_.begin()) {
+                --lower;
+                old_mu = lower->second.mu;
+            } else if (Rt > history_map_.rbegin()->first) {
+                old_mu = history_map_.rbegin()->second.mu;
+            } else {
+                old_mu = history_map_.begin()->second.mu;
+            }
+        }
+        
+        if (std::abs(old_mu - new_mu) > 0.001) {
             total_adjustments_++;
-            MuChangeRecord record(Simulator::Now(), frame_id, 0, old_mu, current_mu_,
-                                 "inter_frame", 0.0, current_qoe);
+            MuChangeRecord record(Simulator::Now(), frame_id, Rt, old_mu, new_mu,
+                                 "rt_lookup", loss_rate, 0.0);
             mu_change_records_.push_back(record);
             
-            std::cout << "[OSCC] Inter-frame adjustment: frame=" << frame_id 
-                     << ", mu: " << old_mu << " -> " << current_mu_
-                     << ", QoE=" << current_qoe << std::endl;
-            
-            // 关键修复：直接应用新μ值到WebrtcSender
-            ApplyMuToSender(current_mu_);
+            std::cout << "[OSCC] Rt-lookup adjustment: frame=" << frame_id 
+                     << ", Rt=" << Rt << ", mu: " << old_mu << " -> " << new_mu
+                     << ", loss=" << loss_rate << std::endl;
         }
     }
     
@@ -470,20 +557,35 @@ private:
         return std::max(mu_min_, std::min(mu_max_, mu));
     }
     
+    // ============================================================================
     // 核心参数
+    // ============================================================================
     double epsilon_;      // 调整步长
     double mu_min_;       // μ下限
     double mu_max_;       // μ上限
-    double current_mu_;   // 当前μ值
     
-    // 历史记录
-    std::map<uint32_t, double> last_frame_rt_loss_;     // 上一帧各Rt组丢包率
-    std::map<uint32_t, double> current_frame_rt_loss_;  // 当前帧各Rt组丢包率
+    // ============================================================================
+    // 基于Rt的历史查表数据结构
+    // ============================================================================
+    
+    // HistoryMap: 上一帧的 {Rt -> (mu, loss)}
+    std::map<uint32_t, RtHistoryEntry> history_map_;
+    
+    // CurrentFrameCache: 当前帧的 {Rt -> mu}
+    std::map<uint32_t, double> current_frame_cache_;
+    
+    // LossWindow: 最近 LOSS_WINDOW_SIZE 个包的丢包状态 (true = 丢包, false = 成功)
+    std::deque<bool> loss_window_;
+    
+    // ============================================================================
+    // QoE统计（仅用于记录，不影响mu调整）
+    // ============================================================================
     std::map<uint32_t, double> frame_qoe_history_;      // 帧QoE历史
     std::map<uint32_t, FrameQoEDetail> frame_qoe_details_;  // 帧QoE详细信息
-    double last_frame_qoe_;          // 上一帧QoE
-    uint32_t last_frame_max_rt_;     // 上一帧最大Rt值
-    uint32_t last_frame_min_rt_;     // 上一帧最小Rt值
+    
+    // ============================================================================
+    // 状态变量
+    // ============================================================================
     uint32_t current_frame_id_;      // 当前帧ID
     
     // 控制标志
@@ -492,6 +594,13 @@ private:
     // 统计和日志
     std::vector<MuChangeRecord> mu_change_records_;  // μ变化记录
     uint32_t total_adjustments_;                      // 总调整次数
+    
+    // ============================================================================
+    // Rt 预估相关参数（发送端使用）
+    // ============================================================================
+    Time estimated_rtt_ = MilliSeconds(30);           // 预估 RTT
+    double estimated_bandwidth_bps_ = 20000000.0;     // 预估带宽 (bps)
+    Time current_frame_deadline_ = Seconds(0);        // 当前帧截止时间
     
     // WebrtcSender引用（用于直接应用μ值到发送端）
     Ptr<WebrtcSender> webrtc_sender_ = nullptr;
@@ -1585,6 +1694,11 @@ public:
         double delay_ms = (now - send_time).GetMilliSeconds();
         if (delay_ms < 0) delay_ms = 0;
 
+        // 更新 OSCC 滑动窗口：收到包表示成功，丢包状态为 false
+        if (oscc_controller_ && oscc_controller_->IsEnabled()) {
+            oscc_controller_->UpdateLossWindow(false);  // false = 包成功接收
+        }
+
         // Get network info from trace via BandwidthChanger
         double trace_loss = 0.01;
         double trace_rtt = 30.0;
@@ -1685,6 +1799,46 @@ public:
          if (rl_manager_) {
             rl_manager_->SetMu(oscc_controller_->GetCurrentMu());
         }
+    }
+    
+    // ============================================================================
+    // RTCP 反馈处理：更新 OSCC 滑动窗口
+    // ============================================================================
+    
+    // 当检测到丢包时调用（例如通过 RTCP TransportFeedback）
+    void OnPacketLost(uint32_t seq_num) {
+        if (oscc_controller_ && oscc_controller_->IsEnabled()) {
+            oscc_controller_->UpdateLossWindow(true);  // true = 包丢失
+            NS_LOG_DEBUG("QoEIntegrationManager: Packet " << seq_num << " lost, updated LossWindow");
+        }
+    }
+    
+    // 批量处理 TransportFeedback
+    void OnTransportFeedback(const std::vector<bool>& packet_received) {
+        if (!oscc_controller_ || !oscc_controller_->IsEnabled()) return;
+        
+        for (bool received : packet_received) {
+            oscc_controller_->UpdateLossWindow(!received);  // true = lost
+        }
+        
+        NS_LOG_DEBUG("QoEIntegrationManager: Processed " << packet_received.size() 
+                    << " feedback entries, current loss rate: " 
+                    << oscc_controller_->GetCurrentWindowLoss());
+    }
+    
+    // 根据 trace 中的 loss 值模拟丢包反馈
+    void SimulateLossFromTrace() {
+        if (!oscc_controller_ || !oscc_controller_->IsEnabled() || !bw_changer_) return;
+        
+        double trace_loss = bw_changer_->GetLossAtTime(Simulator::Now().GetMilliSeconds());
+        
+        // 根据 trace loss 概率决定是否模拟丢包
+        // 使用简单的随机模拟
+        static std::default_random_engine generator(std::random_device{}());
+        std::uniform_real_distribution<double> distribution(0.0, 1.0);
+        
+        bool packet_lost = (distribution(generator) < trace_loss);
+        oscc_controller_->UpdateLossWindow(packet_lost);
     }
     
     // Bandwidth History (Legacy interface for FrameAwareWebrtcTrace)
@@ -2544,7 +2698,8 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
     uint32_t default_frame_height = 1080;
     uint32_t default_frame_width = 1920;
     for (int i=0;i<num;i++) {
-        std::unique_ptr<WebrtcSessionManager> m(CreateWebrtcSessionManager(time_controller,max_rate*0.1,max_rate*0.2,max_rate,default_frame_height,default_frame_width, fps));
+        // std::unique_ptr<WebrtcSessionManager> m(CreateWebrtcSessionManager(time_controller,max_rate*0.1,max_rate*0.2,max_rate,default_frame_height,default_frame_width, fps));
+        std::unique_ptr<WebrtcSessionManager> m(CreateWebrtcSessionManager(time_controller,max_rate,max_rate*0.1,max_rate*0.2,default_frame_height,default_frame_width, fps));
         sesssion_manager.push_back(std::move(m)); 
     }
     UtilCalculator *calculator=UtilCalculator::Instance();

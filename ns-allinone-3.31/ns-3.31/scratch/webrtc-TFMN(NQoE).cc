@@ -163,9 +163,6 @@ public:
         : epsilon_(0.02), mu_min_(0.8), mu_max_(1.2), current_mu_(1.0),
           last_frame_qoe_(0.0), last_frame_max_rt_(0), current_frame_id_(0),
           current_frame_last_rt_(0), last_frame_is_keyframe_(false),
-          last_intra_adjust_time_(Seconds(0)), last_inter_adjust_time_(Seconds(0)),
-          min_adjust_interval_s_(0.1), intra_adjust_count_(0), max_intra_adjust_per_frame_(2),
-          pending_mu_(1.0), has_pending_mu_(false),
           oscc_enabled_(true), total_adjustments_(0) {
         NS_LOG_INFO("OSCCController initialized: epsilon=" << epsilon_ 
                    << ", mu_range=[" << mu_min_ << ", " << mu_max_ << "]");
@@ -225,19 +222,6 @@ public:
             current_frame_rt_loss_.clear();
             current_frame_id_ = frame_id;
             current_frame_last_rt_ = 0;  // 重置当前帧内上一个Rt
-            intra_adjust_count_ = 0;     // 重置帧内调整计数
-            
-            // 改进：在新帧开始时应用待应用的μ值（延迟应用）
-            if (has_pending_mu_) {
-                double old_mu = current_mu_;
-                current_mu_ = ClipMu(pending_mu_);
-                has_pending_mu_ = false;
-                if (std::abs(old_mu - current_mu_) > 0.001) {
-                    ApplyMuToSender(current_mu_);
-                    std::cout << "[OSCC] Applied pending mu at frame start: " << old_mu 
-                             << " -> " << current_mu_ << std::endl;
-                }
-            }
             
             NS_LOG_DEBUG("OSCC: New frame " << frame_id << " started, last_frame_max_rt="
                         << last_frame_max_rt_ << ", last_frame_min_rt=" << last_frame_min_rt_);
@@ -377,70 +361,52 @@ public:
 private:
     // 帧内μ调整（同一Rt组丢包率对比）
     void AdjustMuIntraFrame(uint32_t frame_id, uint32_t Rt, double current_loss) {
-        Time now = Simulator::Now();
-        
-        // 改进1：限制调整频率 - 检查距离上次调整的时间间隔
-        if ((now - last_intra_adjust_time_).GetSeconds() < min_adjust_interval_s_) {
-            NS_LOG_DEBUG("OSCC Intra-frame: Skipping adjustment - too frequent");
-            current_frame_last_rt_ = Rt;  // 仍然更新Rt值
-            return;
-        }
-        
-        // 改进2：限制每帧内的调整次数
-        if (intra_adjust_count_ >= max_intra_adjust_per_frame_) {
-            NS_LOG_DEBUG("OSCC Intra-frame: Skipping adjustment - max per frame reached");
-            current_frame_last_rt_ = Rt;
-            return;
-        }
-        
         double old_mu = current_mu_;
-        double new_mu = current_mu_;
         bool adjusted = false;
         
         // 新增：检测同一帧内Rt下降
         if (current_frame_last_rt_ > 0 && Rt < current_frame_last_rt_) {
             // 同一帧内Rt下降，说明数据包临近deadline，传输机会减少，需要更保守
-            // 改进3：使用更小的调整步长（减半）
-            new_mu -= epsilon_ * 0.5;
+            current_mu_ -= epsilon_;
             adjusted = true;
             NS_LOG_DEBUG("OSCC Intra-frame: Rt decreased within frame (" << current_frame_last_rt_ 
                         << " -> " << Rt << "), mu decreased");
             std::cout << "[OSCC] Intra-frame Rt decrease: frame=" << frame_id 
                      << ", Rt: " << current_frame_last_rt_ << " -> " << Rt 
-                     << ", mu: " << old_mu << " -> " << new_mu << std::endl;
+                     << ", mu decreased to " << current_mu_ << std::endl;
         }
         
         auto it = last_frame_rt_loss_.find(Rt);
         if (it != last_frame_rt_loss_.end()) {
             // 存在历史记录，对比丢包率
             double last_loss = it->second;
-            // 改进4：添加阈值，避免微小变化触发调整
-            double loss_threshold = 0.01;  // 1%的丢包率差异阈值
-            if (current_loss < last_loss - loss_threshold) {
-                // 丢包率显著降低，表现更好，可以更激进
-                new_mu += epsilon_ * 0.5;  // 使用减半的步长
+            if (current_loss < last_loss) {
+                // 丢包率降低，表现更好，可以更激进
+                current_mu_ += epsilon_;
                 adjusted = true;
                 NS_LOG_DEBUG("OSCC Intra-frame: loss improved (" << last_loss << " -> " 
                             << current_loss << "), mu increased");
-            } else if (current_loss > last_loss + loss_threshold) {
-                // 丢包率显著升高，表现更差，需要更保守
-                new_mu -= epsilon_ * 0.5;  // 使用减半的步长
+            } else if (current_loss > last_loss) {
+                // 丢包率升高，表现更差，需要更保守
+                current_mu_ -= epsilon_;
                 adjusted = true;
                 NS_LOG_DEBUG("OSCC Intra-frame: loss degraded (" << last_loss << " -> " 
                             << current_loss << "), mu decreased");
             }
-            // 丢包率变化在阈值内则不调整
+            // 丢包率相同则不调整
         } else if (last_frame_max_rt_ > 0 || last_frame_min_rt_ > 0) {
             // 新出现的Rt组（上一帧没有此Rt），根据Rt范围决定调整方向
             if (Rt > last_frame_max_rt_) {
-                // Rt大于上一帧最大Rt，探索性增加μ（但使用更小的步长）
-                new_mu += epsilon_ * 0.3;  // 使用更小的步长
+                // Rt大于上一帧最大Rt，探索性增加μ
+                current_mu_ += epsilon_;
+                // current_mu_ += 0.02;
                 adjusted = true;
                 NS_LOG_DEBUG("OSCC Intra-frame: new high Rt group (Rt=" << Rt 
                             << " > last_max=" << last_frame_max_rt_ << "), mu increased");
             } else if (Rt < last_frame_min_rt_) {
-                // Rt小于上一帧最小Rt，保守性减小μ（但使用更小的步长）
-                new_mu -= epsilon_ * 0.3;  // 使用更小的步长
+                // Rt小于上一帧最小Rt，保守性减小μ
+                current_mu_ -= epsilon_;
+                // current_mu_ -= 0.02;
                 adjusted = true;
                 NS_LOG_DEBUG("OSCC Intra-frame: new low Rt group (Rt=" << Rt 
                             << " < last_min=" << last_frame_min_rt_ << "), mu decreased");
@@ -449,34 +415,31 @@ private:
         }
         
         // 约束μ在有效范围内
-        new_mu = ClipMu(new_mu);
+        current_mu_ = ClipMu(current_mu_);
         
         // 更新当前帧内上一个Rt值（新增）
         current_frame_last_rt_ = Rt;
         
-        // 改进5：延迟应用调整 - 将调整保存为待应用值，在下一帧开始时应用
-        if (adjusted && std::abs(old_mu - new_mu) > 0.001) {
-            pending_mu_ = new_mu;
-            has_pending_mu_ = true;
-            last_intra_adjust_time_ = now;
-            intra_adjust_count_++;
+        // 记录μ变化
+        if (adjusted && old_mu != current_mu_) {
             total_adjustments_++;
-            
-            MuChangeRecord record(now, frame_id, Rt, old_mu, new_mu,
+            MuChangeRecord record(Simulator::Now(), frame_id, Rt, old_mu, current_mu_,
                                  "intra_frame", current_loss, 0.0);
             mu_change_records_.push_back(record);
             
-            std::cout << "[OSCC] Intra-frame adjustment (pending): frame=" << frame_id 
-                     << ", Rt=" << Rt << ", mu: " << old_mu << " -> " << new_mu
-                     << " (will apply at next frame start), loss=" << current_loss << std::endl;
+            std::cout << "[OSCC] Intra-frame adjustment: frame=" << frame_id 
+                     << ", Rt=" << Rt << ", mu: " << old_mu << " -> " << current_mu_
+                     << ", loss=" << current_loss << std::endl;
             
-            // 注意：不立即应用，等待下一帧开始
+            // 关键修复：直接应用新μ值到WebrtcSender
+            ApplyMuToSender(current_mu_);
         }
     }
     
     // 帧间μ调整（QoE对比）
     void AdjustMuInterFrame(uint32_t frame_id, double current_qoe, bool is_keyframe, bool prev_frame_is_keyframe) {
-        Time now = Simulator::Now();
+        double old_mu = current_mu_;
+        bool adjusted = false;
         
         // 新增：如果是关键帧或上一帧是关键帧，跳过帧间调整
         if (is_keyframe || prev_frame_is_keyframe) {
@@ -491,14 +454,6 @@ private:
             return;
         }
         
-        // 改进1：限制调整频率
-        if ((now - last_inter_adjust_time_).GetSeconds() < min_adjust_interval_s_ * 2) {
-            NS_LOG_DEBUG("OSCC Inter-frame: Skipping adjustment - too frequent");
-            last_frame_qoe_ = current_qoe;
-            last_frame_is_keyframe_ = is_keyframe;
-            return;
-        }
-        
         // 首帧不调整，只记录QoE
         if (frame_id == 0 || last_frame_qoe_ == 0.0) {
             last_frame_qoe_ = current_qoe;
@@ -507,50 +462,41 @@ private:
             return;
         }
         
-        double old_mu = current_mu_;
-        double new_mu = current_mu_;
-        bool adjusted = false;
-        
-        // 改进2：添加QoE变化阈值，避免微小变化触发调整
-        double qoe_threshold = 2.0;  // QoE变化阈值（2分）
-        
-        if (current_qoe > last_frame_qoe_ + qoe_threshold) {
-            // QoE显著提升，可以更激进（但使用较小的步长）
-            new_mu += epsilon_ * 0.5;
+        if (current_qoe > last_frame_qoe_) {
+            // QoE提升，可以更激进
+            current_mu_ += epsilon_;
             adjusted = true;
             NS_LOG_DEBUG("OSCC Inter-frame: QoE improved (" << last_frame_qoe_ << " -> " 
                         << current_qoe << "), mu increased");
-        } else if (current_qoe < last_frame_qoe_ - qoe_threshold) {
-            // QoE显著下降，需要更保守（但使用较小的步长）
-            new_mu -= epsilon_ * 0.5;
+        } else if (current_qoe < last_frame_qoe_) {
+            // QoE下降，需要更保守
+            current_mu_ -= epsilon_;
             adjusted = true;
             NS_LOG_DEBUG("OSCC Inter-frame: QoE degraded (" << last_frame_qoe_ << " -> " 
                         << current_qoe << "), mu decreased");
         }
-        // QoE变化在阈值内则不调整
+        // QoE相同则不调整
         
         // 约束μ在有效范围内
-        new_mu = ClipMu(new_mu);
+        current_mu_ = ClipMu(current_mu_);
         
         // 更新上一帧QoE和关键帧状态
         last_frame_qoe_ = current_qoe;
         last_frame_is_keyframe_ = is_keyframe;  // 新增：更新关键帧状态
         
-        // 改进3：延迟应用调整 - 立即应用（帧间调整频率较低，可以立即应用）
-        if (adjusted && std::abs(old_mu - new_mu) > 0.001) {
-            current_mu_ = new_mu;
-            last_inter_adjust_time_ = now;
+        // 记录μ变化
+        if (adjusted && old_mu != current_mu_) {
             total_adjustments_++;
-            MuChangeRecord record(now, frame_id, 0, old_mu, new_mu,
+            MuChangeRecord record(Simulator::Now(), frame_id, 0, old_mu, current_mu_,
                                  "inter_frame", 0.0, current_qoe);
             mu_change_records_.push_back(record);
             
             std::cout << "[OSCC] Inter-frame adjustment: frame=" << frame_id 
-                     << ", mu: " << old_mu << " -> " << new_mu
+                     << ", mu: " << old_mu << " -> " << current_mu_
                      << ", QoE=" << current_qoe << std::endl;
             
-            // 立即应用帧间调整（因为频率较低）
-            ApplyMuToSender(new_mu);
+            // 关键修复：直接应用新μ值到WebrtcSender
+            ApplyMuToSender(current_mu_);
         }
     }
     
@@ -576,15 +522,6 @@ private:
     uint32_t current_frame_id_;      // 当前帧ID
     uint32_t current_frame_last_rt_; // 当前帧内上一个Rt值
     bool last_frame_is_keyframe_;    // 上一帧是否是关键帧
-    
-    // 改进：调整频率和稳定性控制
-    Time last_intra_adjust_time_;    // 上次帧内调整时间
-    Time last_inter_adjust_time_;    // 上次帧间调整时间
-    double min_adjust_interval_s_;   // 最小调整间隔（秒）
-    uint32_t intra_adjust_count_;    // 当前帧内调整次数
-    uint32_t max_intra_adjust_per_frame_; // 每帧最大帧内调整次数
-    double pending_mu_;              // 待应用的μ值（延迟应用）
-    bool has_pending_mu_;            // 是否有待应用的μ值
     
     // 控制标志
     bool oscc_enabled_;
@@ -2664,7 +2601,7 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
     if (oscc_mode) {
         for (int i = 0; i < num; i++) {
             auto oscc = std::make_unique<OSCCController>();
-            oscc->SetParameters(0.00, 0.8, 1.2, bandwidth_scale_factor);
+            oscc->SetParameters(0.02, 0.8, 1.2, bandwidth_scale_factor);
             oscc->SetEnabled(true);
             rl_managers[i]->SetOSCCController(oscc.get());
             oscc_controllers.push_back(std::move(oscc));

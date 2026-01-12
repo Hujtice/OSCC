@@ -3,3 +3,11 @@ ns-allinone-3.31/ns-3.31/.*esults
 webrtc-header-lib/*
 ns-allinone-3.31/ns-3.31/.waf*
 ns-allinone-3.31/ns-3.31/__pycache__
+# 忽略任何位置的 build 目录
+**/build/
+# 忽略所有编译生成的依赖文件
+*.d
+*.o
+*.pyc
+# 忽略 ns-3 的构建锁定
+.lock-waf_*
