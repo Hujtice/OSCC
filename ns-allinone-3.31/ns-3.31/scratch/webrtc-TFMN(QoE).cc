@@ -1588,17 +1588,28 @@ public:
         // Get network info from trace via BandwidthChanger
         double trace_loss = 0.01;
         double trace_rtt = 30.0;
-        double trace_bw = 20000000.0;
+        double trace_bw = 20000000.0;  // 默认值
         
         if (bw_changer_) {
             uint32_t ts = now.GetMilliSeconds();
             trace_loss = bw_changer_->GetLossAtTime(ts);
             trace_rtt = bw_changer_->GetRTTAtTime(ts);
-            trace_bw = bw_changer_->GetTraceBandwidthAtTime(ts);
+            // 注：不再从trace文件直接获取带宽
+            // trace_bw = bw_changer_->GetTraceBandwidthAtTime(ts);
         }
         
         rl_manager_->UpdateNetworkState(delay_ms, trace_loss, MilliSeconds(trace_rtt));
         
+        // 优先使用平滑后的GCC带宽（真实场景可用）
+        double smoothed_bw = GetSmoothedGccBandwidth(now, 5);  // 前5个样本平均
+        std::cout << "smoothed_bw: " << smoothed_bw << std::endl;
+        if (smoothed_bw > 0) {
+            trace_bw = smoothed_bw;
+        } else if (bw_changer_) {
+            // 仿真场景回退到trace文件
+            trace_bw = bw_changer_->GetTraceBandwidthAtTime(now.GetMilliSeconds());
+        }
+        std::cout << "trace_bw: " << trace_bw << std::endl;
         // Get GCC bandwidth from history
         double gcc_bw = GetNearestGccBandwidth(now);
         if (gcc_bw <= 0) gcc_bw = trace_bw * 0.7; // Fallback
@@ -1702,6 +1713,30 @@ public:
             }
         }
         return bw;
+    }
+    
+    // 获取平滑后的GCC带宽（滑动窗口平均）
+    double GetSmoothedGccBandwidth(Time timestamp, int window_size = 5) const {
+        if (bandwidth_history_.empty()) return 0.0;
+        
+        // 收集最近 window_size 个带宽样本
+        std::vector<double> recent_bw;
+        for (auto it = bandwidth_history_.rbegin(); 
+             it != bandwidth_history_.rend() && recent_bw.size() < static_cast<size_t>(window_size); 
+             ++it) {
+            if (it->gcc_bandwidth > 0) {
+                recent_bw.push_back(it->gcc_bandwidth);
+            }
+        }
+        
+        if (recent_bw.empty()) return 0.0;
+        
+        // 计算平均值
+        double sum = 0.0;
+        for (double bw : recent_bw) {
+            sum += bw;
+        }
+        return sum / recent_bw.size();
     }
     
     // Skip Frame Proxy (Legacy interface)
