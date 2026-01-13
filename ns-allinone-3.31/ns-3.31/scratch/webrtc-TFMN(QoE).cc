@@ -2619,7 +2619,8 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
                      bool oscc_mode = false,
                      uint32_t fps = 30,
                      const std::string& frame_trace_output = "",
-                     bool skip_frame_enabled = false)
+                     bool skip_frame_enabled = false,
+                     const std::string& base_output_folder = "trace_results")
 {
     std::cout << "\n=== test_app_on_p2p started with Real Video Frame Analysis ===" << std::endl;
     std::cout << "Instance: " << instance << std::endl;
@@ -2819,30 +2820,30 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
     for (int i = 0; i < num; i++) {
         // Frame Playout Trace
         std::string trace_output_file = frame_trace_output;
-        if (trace_output_file.empty()) {
-            trace_output_file = prefix + std::to_string(i+1) + "_frame_playout_trace.csv";
+        if (!trace_output_file.empty()) {
+            trace_output_file = base_output_folder + "/" + prefix + std::to_string(i+1) + "_frame_playout_trace.csv";
         }
         frame_playout_managers[i]->ExportFrameTrace(trace_output_file);
         
         // Output Bandwidth History from QoEManager
-        std::string bw_history_file = prefix + std::to_string(i+1) + "_bandwidth_history.csv";
+        std::string bw_history_file = base_output_folder + "/" + prefix + std::to_string(i+1) + "_bandwidth_history.csv";
         qoe_managers[i]->OutputBandwidthHistory(bw_history_file);
         
         // Output Bandwidth Statistics from Trace
-        std::string bw_stats_file = prefix + std::to_string(i+1) + "_mu=" + 
+        std::string bw_stats_file = base_output_folder + "/" + prefix + std::to_string(i+1) + "_mu=" + 
                                 std::to_string(bandwidth_scale_factor) + "_L=" + 
                                 std::to_string(loss_rate) + "_bandwidth_statistics.csv";
         trace_vec[i]->OutputBandwidthStatistics(bw_stats_file, loss_rate);
         
         // Output RL Records
-        rl_managers[i]->OutputStateRecords(prefix + std::to_string(i+1), bandwidth_scale_factor, loss_rate);
-        rl_managers[i]->OutputRtGroupRewards(prefix + std::to_string(i+1), bandwidth_scale_factor, loss_rate);
+        rl_managers[i]->OutputStateRecords(base_output_folder + "/" + prefix + std::to_string(i+1), bandwidth_scale_factor, loss_rate);
+        rl_managers[i]->OutputRtGroupRewards(base_output_folder + "/" + prefix + std::to_string(i+1), bandwidth_scale_factor, loss_rate);
         
         // OSCC Stats
         if (oscc_mode && i < static_cast<int>(oscc_controllers.size()) && oscc_controllers[i]) {
-            std::string mu_trace_file = prefix + std::to_string(i+1) + "_OSCC_mu_trace.csv";
+            std::string mu_trace_file = base_output_folder + "/" + prefix + std::to_string(i+1) + "_OSCC_mu_trace.csv";
             oscc_controllers[i]->OutputMuTrace(mu_trace_file);
-            std::string qoe_file = prefix + std::to_string(i+1) + "_OSCC_qoe.csv";
+            std::string qoe_file = base_output_folder + "/" + prefix + std::to_string(i+1) + "_OSCC_qoe.csv";
             oscc_controllers[i]->OutputFrameQoE(qoe_file);
         }
     }
