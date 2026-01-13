@@ -3092,7 +3092,7 @@ int main(int argc, char *argv[]){
     }
     
     // 设置默认帧trace输出路径
-    if (frame_trace_output.empty()) {
+    if (!frame_trace_output.empty()) {
         frame_trace_output = folder + "/" + instance + "_frame_trace.csv";
     }
 
@@ -3122,3 +3122,6 @@ int main(int argc, char *argv[]){
     _exit(0);
     return 0;
 }
+
+// hjt@ubuntu-Precision-Tower-5810:~/OSCC/ns-allinone-3.31/ns-3.31$ ./waf --run "scratch/webrtc-TFMN(QoE) --trace=/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/AItrans_2.log --ls=0.01 --skip=true --oscc=true --folder=trace_results/AItrans_test --it=AItrans_case1" > webrtc_ns3.log 2>&1
+// hjt@ubuntu-Precision-Tower-5810:~/OSCC/ns-allinone-3.31/ns-3.31$ ./waf --run "scratch/webrtc-TFMN(GCC) --trace=/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/AItrans_2.log --ls=0.01 --skip=true --oscc=true --folder=trace_results/AItrans_test --it=AItrans_case1" > webrtc_ns3.log 2>&1
