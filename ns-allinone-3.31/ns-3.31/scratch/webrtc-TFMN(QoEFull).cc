@@ -509,21 +509,40 @@ private:
         return mu_prev;  // 相等，保持不变
     }
     
-    // 帧边界处理：用当前帧缓存替换历史表
+    // 帧边界处理：将当前帧缓存更新到全局历史表
     void OnNewFrameStart(uint32_t new_frame_id) {
-        // 用当前帧缓存替换历史表
+        // 将当前帧缓存更新到全局历史表（不清空历史表）
         if (!current_frame_cache_.empty()) {
-            history_map_.clear();
             double L_curr = GetCurrentWindowLoss();
+            int updated_count = 0;
+            int new_count = 0;
+            
             for (const auto& entry : current_frame_cache_) {
-                history_map_[entry.first] = RtHistoryEntry(entry.second, L_curr);
+                uint32_t Rt = entry.first;
+                double mu = entry.second;
+                
+                // 更新或插入HistoryMap中的条目
+                auto it = history_map_.find(Rt);
+                if (it != history_map_.end()) {
+                    // 已存在该Rt，更新mu和loss
+                    it->second.mu = mu;
+                    it->second.recorded_loss = L_curr;
+                    updated_count++;
+                } else {
+                    // 新的Rt值，插入到HistoryMap
+                    history_map_[Rt] = RtHistoryEntry(mu, L_curr);
+                    new_count++;
+                }
             }
             
             NS_LOG_DEBUG("OSCC: Frame " << current_frame_id_ << " -> " << new_frame_id 
-                        << ", updated HistoryMap with " << history_map_.size() << " entries");
+                        << ", HistoryMap updated: " << updated_count << " existing, " 
+                        << new_count << " new, total=" << history_map_.size() << " entries");
             
-            std::cout << "[OSCC] New frame " << new_frame_id << " started, HistoryMap updated with " 
-                      << history_map_.size() << " Rt entries from frame " << current_frame_id_ << std::endl;
+            std::cout << "[OSCC] New frame " << new_frame_id << " started, HistoryMap updated: " 
+                      << updated_count << " existing Rt entries updated, " 
+                      << new_count << " new Rt entries added, total=" << history_map_.size() 
+                      << " (global accumulation)" << std::endl;
         }
         
         // 清空缓存，准备新帧
@@ -579,7 +598,8 @@ private:
     // 基于Rt的历史查表数据结构
     // ============================================================================
     
-    // HistoryMap: 上一帧的 {Rt -> (mu, loss)}
+    // HistoryMap: 全局累积的 {Rt -> (mu, loss)} 映射表
+    // 跨帧保持，每个帧结束时用CurrentFrameCache的内容更新相应Rt条目
     std::map<uint32_t, RtHistoryEntry> history_map_;
     
     // CurrentFrameCache: 当前帧的 {Rt -> mu}
