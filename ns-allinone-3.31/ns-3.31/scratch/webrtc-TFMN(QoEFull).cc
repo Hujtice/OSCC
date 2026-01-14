@@ -180,6 +180,7 @@ public:
         std::cout << "  epsilon: " << epsilon_ << std::endl;
         std::cout << "  mu_range: [" << mu_min_ << ", " << mu_max_ << "]" << std::endl;
         std::cout << "  loss_window_size: " << LOSS_WINDOW_SIZE << std::endl;
+        std::cout << "  startup_policy: frames 0-1 use GCC only (mu=1.0), OSCC starts at frame 2" << std::endl;
         std::cout << "=================================================" << std::endl;
     }
     
@@ -236,6 +237,13 @@ public:
     double GetMuForPacket(uint32_t frame_id, uint32_t Rt) {
         if (!oscc_enabled_) {
             return 1.0;  // 禁用时返回默认值
+        }
+        
+        // 前两帧（frame_id < 2）使用原始GCC速率，不进行OSCC自适应调整
+        if (frame_id < 2) {
+            NS_LOG_DEBUG("OSCC: Frame " << frame_id << " < 2, using default mu=1.0 (GCC only)");
+            std::cout << "[OSCC] Frame " << frame_id << " < 2, using default mu=1.0 (original GCC rate)" << std::endl;
+            return 1.0;
         }
         
         // 帧边界检测：新帧开始时更新 HistoryMap
