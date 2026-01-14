@@ -219,6 +219,13 @@ public:
         while (loss_window_.size() > LOSS_WINDOW_SIZE) {
             loss_window_.pop_front();
         }
+        // 打印滑动窗口大小和内容
+        std::cout << "当前滑动窗口大小：" << loss_window_.size() << std::endl;
+        std::cout << "当前滑动窗口内容依次为：" << std::endl;
+        for (const auto& item : loss_window_) {
+            std::cout << item << " ";
+        }
+        std::cout << std::endl;
     }
     
     // ============================================================================
@@ -449,6 +456,7 @@ private:
                         << ", L_prev=" << it->second.recorded_loss 
                         << ", L_curr=" << L_curr << ", mu: " << it->second.mu << " -> " << new_mu);
             return new_mu;
+            // return 1.0;
         }
         
         // 获取历史 Rt 范围
@@ -462,6 +470,7 @@ private:
             NS_LOG_DEBUG("OSCC: Rt=" << Rt << " > max_rt=" << max_rt 
                         << ", aggressive: mu " << mu_max_hist << " -> " << new_mu);
             return new_mu;
+            // return 1.0;
         }
         
         // 情况 3: 小于最小值 (保守策略)
@@ -471,6 +480,7 @@ private:
             NS_LOG_DEBUG("OSCC: Rt=" << Rt << " < min_rt=" << min_rt 
                         << ", conservative: mu " << mu_min_hist << " -> " << new_mu);
             return new_mu;
+            // return 1.0;
         }
         
         // 情况 4: 位于区间内，找 lower_bound 邻居
@@ -482,6 +492,7 @@ private:
                         << ", L_prev=" << lower->second.recorded_loss 
                         << ", L_curr=" << L_curr << ", mu: " << lower->second.mu << " -> " << new_mu);
             return new_mu;
+            // return 1.0;
         }
         
         NS_LOG_DEBUG("OSCC: Fallback to default mu=1.0");
