@@ -11,6 +11,7 @@
 #include <cmath>
 #include <numeric>
 #include <deque>
+#include <random>
 #include "ns3/webrtc-defines.h"
 #include "ns3/core-module.h"
 #include "ns3/applications-module.h"
@@ -112,19 +113,32 @@ struct TraceData {
 };
 
 // ============================================================================
+// 前向声明
+// ============================================================================
+class RLStateManager;
+
+// ============================================================================
 // OSCCController 类 - OSCC算法核心控制器
-// 实现HAFA启发式算法的动态μ调整机制
+// 实现基于Rt的精细化历史查表机制进行动态μ调整
 // ============================================================================
 class OSCCController {
 public:
-    // μ变化记录结构
+    // 历史状态记录结构 (用于 HistoryMap)
+    struct RtHistoryEntry {
+        double mu;
+        double recorded_loss;
+        
+        RtHistoryEntry(double m = 1.0, double l = 0.01) : mu(m), recorded_loss(l) {}
+    };
+    
+    // μ变化记录结构 (用于日志输出)
     struct MuChangeRecord {
         Time timestamp;
         uint32_t frame_id;
         uint32_t Rt_value;
         double old_mu;
         double new_mu;
-        std::string trigger_type;  // "intra_frame" 或 "inter_frame"
+        std::string trigger_type;  // "rt_lookup"
         double loss_rate;
         double qoe;
         
@@ -158,19 +172,56 @@ public:
                           qoe_delay(0.0), qoe_loss(0.0), qoe_ddl(0.0), qoe(0.0),
                           mu(1.0), timestamp(Seconds(0)) {}
     };
+    
+    // 新增：待判定帧的 Rt 数据（用于基于 Reward 的滞后更新）
+    struct PendingRtData {
+        double mu;                    // 当前帧使用的 mu
+        double loss_rate;             // 当前帧的 loss_rate
+        double reward_sum;            // 当前帧该 Rt 的 reward 总和
+        uint32_t packet_count;        // 当前帧该 Rt 的包数量
+        double prev_mu;               // 上一个决策的 mu（从 HistoryMap 中获取）
+        double prev_reward_sum;       // 上一个决策的 reward 总和（用于比较）
+        uint32_t prev_packet_count;   // 上一个决策的包数量
+        bool all_packets_received;    // 是否所有包都已收到 ACK
+        
+        PendingRtData() : mu(1.0), loss_rate(0.05), reward_sum(0.0), packet_count(0),
+                         prev_mu(1.0), prev_reward_sum(0.0), prev_packet_count(0),
+                         all_packets_received(false) {}
+    };
+    
+    // 待判定帧的数据结构
+    struct PendingFrameData {
+        uint32_t frame_id;
+        std::map<uint32_t, PendingRtData> rt_data_map;  // {Rt -> PendingRtData}
+        Time frame_complete_time;     // 帧完成时间
+        bool frame_finalized;          // 是否已判定完成
+        
+        PendingFrameData() : frame_id(0), frame_complete_time(Seconds(0)), frame_finalized(false) {}
+    };
+    
+    // 滑动窗口大小常量
+    static const size_t LOSS_WINDOW_SIZE = 100;
 
     OSCCController() 
-        : epsilon_(0.02), mu_min_(0.8), mu_max_(1.2), current_mu_(1.0),
-          last_frame_qoe_(0.0), last_frame_max_rt_(0), current_frame_id_(0),
-          current_frame_last_rt_(0), last_frame_is_keyframe_(false),
-          oscc_enabled_(true), total_adjustments_(0) {
+        : epsilon_(0.02), mu_min_(0.5), mu_max_(1.5),
+          current_frame_id_(0), oscc_enabled_(true), total_adjustments_(0) {
+        // 初始化全局 HistoryMap：Rt = 0, 1, 2, ..., 10
+        // 每个 Rt 的初始值：loss_rate = 0.05, mu = 1.0 + Rt * 0.05
+        for (uint32_t rt = 0; rt <= 10; ++rt) {
+            double initial_mu = 1.0 + rt * 0.05;  // Rt=0时mu=1.0, Rt=10时mu=1.5
+            double initial_loss = 0.05;
+            history_map_[rt] = RtHistoryEntry(initial_mu, initial_loss);
+        }
+        
         NS_LOG_INFO("OSCCController initialized: epsilon=" << epsilon_ 
                    << ", mu_range=[" << mu_min_ << ", " << mu_max_ << "]");
-        std::cout << "=== OSCCController Initialized ===" << std::endl;
+        std::cout << "=== OSCCController Initialized (Global HistoryMap) ===" << std::endl;
         std::cout << "  epsilon: " << epsilon_ << std::endl;
         std::cout << "  mu_range: [" << mu_min_ << ", " << mu_max_ << "]" << std::endl;
-        std::cout << "  initial_mu: " << current_mu_ << std::endl;
-        std::cout << "==================================" << std::endl;
+        std::cout << "  loss_window_size: " << LOSS_WINDOW_SIZE << std::endl;
+        std::cout << "  Global HistoryMap initialized with Rt=0~10 (11 entries)" << std::endl;
+        std::cout << "  Initial values: loss_rate=0.05, mu=1.0+Rt*0.05" << std::endl;
+        std::cout << "=================================================" << std::endl;
     }
     
     // 设置OSCC参数
@@ -178,11 +229,10 @@ public:
         epsilon_ = epsilon;
         mu_min_ = mu_min;
         mu_max_ = mu_max;
-        current_mu_ = ClipMu(initial_mu);
         
         NS_LOG_INFO("OSCCController parameters set: epsilon=" << epsilon_ 
                    << ", mu_range=[" << mu_min_ << ", " << mu_max_ << "]"
-                   << ", initial_mu=" << current_mu_);
+                   << ", initial_mu=" << initial_mu);
     }
     
     // 启用/禁用OSCC
@@ -193,101 +243,122 @@ public:
     
     bool IsEnabled() const { return oscc_enabled_; }
     
-    // 获取当前μ值（供每个包使用）
-    double GetMuForPacket(uint32_t frame_id, uint32_t Rt) {
-        if (!oscc_enabled_) {
-            return current_mu_;
-        }
-        
-        // 记录当前帧ID
-        if (frame_id != current_frame_id_) {
-            // 新帧开始，保存上一帧的Rt-Loss映射
-            if (current_frame_id_ > 0 || !current_frame_rt_loss_.empty()) {
-                last_frame_rt_loss_ = current_frame_rt_loss_;
-                last_frame_max_rt_ = 0;
-                last_frame_min_rt_ = UINT32_MAX;  // 初始化为最大值
-                for (const auto& pair : last_frame_rt_loss_) {
-                    if (pair.first > last_frame_max_rt_) {
-                        last_frame_max_rt_ = pair.first;
-                    }
-                    if (pair.first < last_frame_min_rt_) {
-                        last_frame_min_rt_ = pair.first;
-                    }
-                }
-                // 如果没有记录，重置min_rt为0
-                if (last_frame_min_rt_ == UINT32_MAX) {
-                    last_frame_min_rt_ = 0;
-                }
-            }
-            current_frame_rt_loss_.clear();
-            current_frame_id_ = frame_id;
-            current_frame_last_rt_ = 0;  // 重置当前帧内上一个Rt
-            
-            NS_LOG_DEBUG("OSCC: New frame " << frame_id << " started, last_frame_max_rt="
-                        << last_frame_max_rt_ << ", last_frame_min_rt=" << last_frame_min_rt_);
-        }
-        
-        NS_LOG_DEBUG("OSCC: GetMuForPacket frame=" << frame_id << ", Rt=" << Rt 
-                    << ", current_mu=" << current_mu_);
-        
-        return current_mu_;
+    // ============================================================================
+    // 滑动窗口丢包率相关方法
+    // ============================================================================
+    
+    // 获取当前滑动窗口的丢包率
+    double GetCurrentWindowLoss() const {
+        if (loss_window_.empty()) return 0.01;  // 默认值
+        size_t lost = std::count(loss_window_.begin(), loss_window_.end(), true);
+        return static_cast<double>(lost) / loss_window_.size();
     }
     
-    // Rt组完成时调用（帧内调整）
+    // 更新滑动窗口 (RTCP 反馈时调用)
+    void UpdateLossWindow(bool packet_lost) {
+        loss_window_.push_back(packet_lost);
+        while (loss_window_.size() > LOSS_WINDOW_SIZE) {
+            loss_window_.pop_front();
+        }
+        // 打印滑动窗口大小和内容
+        std::cout << "当前滑动窗口大小：" << loss_window_.size() << std::endl;
+        std::cout << "当前滑动窗口内容依次为：" << std::endl;
+        for (const auto& item : loss_window_) {
+            std::cout << item << " ";
+        }
+        std::cout << std::endl;
+    }
+    
+    // ============================================================================
+    // 核心查表逻辑 - 基于Rt的mu决策
+    // ============================================================================
+    
+    // 获取当前μ值（供每个包使用）- 基于Rt查表机制
+    double GetMuForPacket(uint32_t frame_id, uint32_t Rt) {
+        if (!oscc_enabled_) {
+            return 1.0;  // 禁用时返回默认值
+        }
+        
+        // 帧边界检测：新帧开始时更新 HistoryMap
+        if (frame_id != current_frame_id_) {
+            OnNewFrameStart(frame_id);
+        }
+        
+        // 步骤 A: 检查帧内缓存
+        auto cache_it = current_frame_cache_.find(Rt);
+        if (cache_it != current_frame_cache_.end()) {
+            NS_LOG_DEBUG("OSCC: Cache hit for Rt=" << Rt << ", mu=" << cache_it->second);
+            return cache_it->second;  // 缓存命中
+        }
+        
+        // 步骤 B: 计算新 mu
+        double L_curr = GetCurrentWindowLoss();
+        double new_mu = CalculateMuFromHistory(Rt, L_curr);
+        
+        // 记录mu变化（用于日志）
+        RecordMuChange(frame_id, Rt, new_mu, L_curr);
+        
+        // 存入缓存
+        current_frame_cache_[Rt] = new_mu;
+        
+        // 应用新mu到发送端
+        ApplyMuToSender(new_mu);
+        
+        NS_LOG_DEBUG("OSCC: GetMuForPacket frame=" << frame_id << ", Rt=" << Rt 
+                    << ", L_curr=" << L_curr << ", new_mu=" << new_mu);
+        
+        return new_mu;
+    }
+    
+    // Rt组完成时调用 - 新架构下不再需要此方法进行mu调整，保留用于兼容性
     void OnRtGroupComplete(uint32_t frame_id, uint32_t Rt, double group_loss) {
         if (!oscc_enabled_) {
             return;
         }
         
-        // 记录当前帧的Rt-Loss
-        current_frame_rt_loss_[Rt] = group_loss;
-        
-        // 执行帧内μ调整
-        AdjustMuIntraFrame(frame_id, Rt, group_loss);
-        
-        NS_LOG_INFO("OSCC: Rt group complete - frame=" << frame_id << ", Rt=" << Rt 
-                   << ", loss=" << group_loss << ", new_mu=" << current_mu_);
+        // 仅记录日志，不再进行mu调整（mu已在GetMuForPacket中确定）
+        NS_LOG_DEBUG("OSCC: Rt group complete - frame=" << frame_id << ", Rt=" << Rt 
+                   << ", loss=" << group_loss);
     }
     
-    // 帧完成时调用（帧间调整）
+    // 帧完成时调用 - 将当前帧数据放入 pending_frame_map_，等待 ACK 反馈后再判定是否更新 HistoryMap
+    // 实现在 RLStateManager 类定义之后
     void OnFrameComplete(uint32_t frame_id, double frame_qoe,
                       double bandwidth_utilization, double loss_rate,
                       double delay_metric, double delay_avg, double ddl_miss_rate,
                       double qoe_recv, double qoe_delay,
                       double qoe_loss, double qoe_ddl,
-                      bool is_keyframe) {
-        if (!oscc_enabled_) {
-            return;
+                      RLStateManager* rl_manager = nullptr);
+    
+    // 新增：当包 ACK 返回时调用，更新对应帧的 reward 统计
+    void OnPacketAckReceived(uint32_t frame_id, uint32_t Rt, double reward, double loss_rate);
+    
+    // 新增：检查并更新 HistoryMap（当帧的所有包都反馈完成时调用）
+    // 实现在 RLStateManager 类定义之后
+    void CheckAndUpdateHistoryMap(uint32_t frame_id, RLStateManager* rl_manager);
+    
+    // 新增：从 pending_frame_map_ 中查找 mu（按帧 ID 从新到旧）
+    double GetMuFromPendingFrames(uint32_t Rt) {
+        // 从最新的帧开始查找
+        for (auto it = pending_frame_map_.rbegin(); it != pending_frame_map_.rend(); ++it) {
+            const PendingFrameData& pending_frame = it->second;
+            auto rt_it = pending_frame.rt_data_map.find(Rt);
+            if (rt_it != pending_frame.rt_data_map.end()) {
+                return rt_it->second.mu;
+            }
         }
         
-        // 执行帧间μ调整（传入关键帧信息）
-        AdjustMuInterFrame(frame_id, frame_qoe, is_keyframe, last_frame_is_keyframe_);
-        
-        // 保存当前帧QoE详细信息
-        FrameQoEDetail detail;
-        detail.frame_id = frame_id;
-        detail.bandwidth_utilization = bandwidth_utilization;
-        detail.loss_rate = loss_rate;
-        detail.delay_metric = delay_metric;
-        detail.delay_avg = delay_avg;  // 新增：保存平均延迟
-        detail.ddl_miss_rate = ddl_miss_rate;
-        detail.qoe_recv = qoe_recv;
-        detail.qoe_delay = qoe_delay;
-        detail.qoe_loss = qoe_loss;
-        detail.qoe_ddl = qoe_ddl;
-        detail.qoe = frame_qoe;
-        detail.mu = current_mu_;
-        detail.timestamp = Simulator::Now();
-        
-        frame_qoe_details_[frame_id] = detail;
-        frame_qoe_history_[frame_id] = frame_qoe;
-        
-        NS_LOG_INFO("OSCC: Frame complete - frame=" << frame_id << ", QoE=" << frame_qoe 
-                   << ", is_keyframe=" << is_keyframe << ", new_mu=" << current_mu_);
+        // 如果 pending_frame_map_ 中没有，返回默认值
+        return 1.0;
     }
     
-    // 获取当前μ
-    double GetCurrentMu() const { return current_mu_; }
+    // 获取当前μ（返回最近使用的mu，用于日志/统计）
+    double GetCurrentMu() const {
+        if (current_frame_cache_.empty()) {
+            return history_map_.empty() ? 1.0 : history_map_.begin()->second.mu;
+        }
+        return current_frame_cache_.begin()->second;
+    }
     
     // 获取μ变化记录
     const std::vector<MuChangeRecord>& GetMuChangeRecords() const {
@@ -358,145 +429,180 @@ public:
     // 获取统计信息
     uint32_t GetTotalAdjustments() const { return total_adjustments_; }
     
-private:
-    // 帧内μ调整（同一Rt组丢包率对比）
-    void AdjustMuIntraFrame(uint32_t frame_id, uint32_t Rt, double current_loss) {
-        double old_mu = current_mu_;
-        bool adjusted = false;
-        
-        // 新增：检测同一帧内Rt下降
-        if (current_frame_last_rt_ > 0 && Rt < current_frame_last_rt_) {
-            // 同一帧内Rt下降，说明数据包临近deadline，传输机会减少，需要更保守
-            current_mu_ -= epsilon_;
-            adjusted = true;
-            NS_LOG_DEBUG("OSCC Intra-frame: Rt decreased within frame (" << current_frame_last_rt_ 
-                        << " -> " << Rt << "), mu decreased");
-            std::cout << "[OSCC] Intra-frame Rt decrease: frame=" << frame_id 
-                     << ", Rt: " << current_frame_last_rt_ << " -> " << Rt 
-                     << ", mu decreased to " << current_mu_ << std::endl;
-        }
-        
-        auto it = last_frame_rt_loss_.find(Rt);
-        if (it != last_frame_rt_loss_.end()) {
-            // 存在历史记录，对比丢包率
-            double last_loss = it->second;
-            if (current_loss < last_loss) {
-                // 丢包率降低，表现更好，可以更激进
-                current_mu_ += epsilon_;
-                adjusted = true;
-                NS_LOG_DEBUG("OSCC Intra-frame: loss improved (" << last_loss << " -> " 
-                            << current_loss << "), mu increased");
-            } else if (current_loss > last_loss) {
-                // 丢包率升高，表现更差，需要更保守
-                current_mu_ -= epsilon_;
-                adjusted = true;
-                NS_LOG_DEBUG("OSCC Intra-frame: loss degraded (" << last_loss << " -> " 
-                            << current_loss << "), mu decreased");
-            }
-            // 丢包率相同则不调整
-        } else if (last_frame_max_rt_ > 0 || last_frame_min_rt_ > 0) {
-            // 新出现的Rt组（上一帧没有此Rt），根据Rt范围决定调整方向
-            if (Rt > last_frame_max_rt_) {
-                // Rt大于上一帧最大Rt，探索性增加μ
-                current_mu_ += epsilon_;
-                // current_mu_ += 0.02;
-                adjusted = true;
-                NS_LOG_DEBUG("OSCC Intra-frame: new high Rt group (Rt=" << Rt 
-                            << " > last_max=" << last_frame_max_rt_ << "), mu increased");
-            } else if (Rt < last_frame_min_rt_) {
-                // Rt小于上一帧最小Rt，保守性减小μ
-                current_mu_ -= epsilon_;
-                // current_mu_ -= 0.02;
-                adjusted = true;
-                NS_LOG_DEBUG("OSCC Intra-frame: new low Rt group (Rt=" << Rt 
-                            << " < last_min=" << last_frame_min_rt_ << "), mu decreased");
-            }
-            // Rt介于上一帧最小和最大之间，不调整
-        }
-        
-        // 约束μ在有效范围内
-        current_mu_ = ClipMu(current_mu_);
-        
-        // 更新当前帧内上一个Rt值（新增）
-        current_frame_last_rt_ = Rt;
-        
-        // 记录μ变化
-        if (adjusted && old_mu != current_mu_) {
-            total_adjustments_++;
-            MuChangeRecord record(Simulator::Now(), frame_id, Rt, old_mu, current_mu_,
-                                 "intra_frame", current_loss, 0.0);
-            mu_change_records_.push_back(record);
-            
-            std::cout << "[OSCC] Intra-frame adjustment: frame=" << frame_id 
-                     << ", Rt=" << Rt << ", mu: " << old_mu << " -> " << current_mu_
-                     << ", loss=" << current_loss << std::endl;
-            
-            // 关键修复：直接应用新μ值到WebrtcSender
-            ApplyMuToSender(current_mu_);
-        }
+    // ============================================================================
+    // 发送端 Rt 预估
+    // ============================================================================
+    
+    // 设置用于 Rt 预估的参数
+    void SetRtEstimationParams(Time rtt, double bandwidth_bps) {
+        estimated_rtt_ = rtt;
+        estimated_bandwidth_bps_ = bandwidth_bps;
     }
     
-    // 帧间μ调整（QoE对比）
-    void AdjustMuInterFrame(uint32_t frame_id, double current_qoe, bool is_keyframe, bool prev_frame_is_keyframe) {
-        double old_mu = current_mu_;
-        bool adjusted = false;
+    // 设置帧截止时间（由发送端帧管理器调用）
+    void SetCurrentFrameDeadline(Time deadline) {
+        current_frame_deadline_ = deadline;
+    }
+    
+    // 发送端预估 Rt（在发包前调用）
+    uint32_t EstimateRt(uint32_t packet_size) {
+        Time now = Simulator::Now();
+        Time T_remain = current_frame_deadline_ - now;
         
-        // 新增：如果是关键帧或上一帧是关键帧，跳过帧间调整
-        if (is_keyframe || prev_frame_is_keyframe) {
-            NS_LOG_DEBUG("OSCC Inter-frame: Skipping adjustment - current_frame=" << frame_id 
-                        << " is_keyframe=" << is_keyframe 
-                        << ", prev_is_keyframe=" << prev_frame_is_keyframe);
-            // 仍然记录QoE，但不调整μ
-            if (frame_id == 0 || last_frame_qoe_ == 0.0) {
-                last_frame_qoe_ = current_qoe;
+        if (T_remain <= Seconds(0) || estimated_bandwidth_bps_ <= 0) {
+            return 0;
+        }
+        
+        double send_time_s = (packet_size * 8.0) / estimated_bandwidth_bps_;
+        Time available = T_remain - Seconds(send_time_s);
+        
+        if (available <= Seconds(0) || estimated_rtt_ <= Seconds(0)) {
+            return 0;
+        }
+        
+        uint32_t Rt = static_cast<uint32_t>(available.GetSeconds() / estimated_rtt_.GetSeconds());
+        
+        NS_LOG_DEBUG("OSCC EstimateRt: T_remain=" << T_remain.GetSeconds() 
+                    << "s, send_time=" << send_time_s << "s, RTT=" << estimated_rtt_.GetSeconds()
+                    << "s, Rt=" << Rt);
+        
+        return Rt;
+    }
+    
+    // 便捷方法：预估 Rt 并获取对应的 mu
+    double GetMuForPacketWithEstimation(uint32_t frame_id, uint32_t packet_size) {
+        uint32_t Rt = EstimateRt(packet_size);
+        return GetMuForPacket(frame_id, Rt);
+    }
+    
+private:
+    // ============================================================================
+    // 核心查表算法
+    // ============================================================================
+    
+    // 根据历史计算 mu（如果 HistoryMap 中没有该 Rt，从 pending_frame_map_ 中查找）
+    double CalculateMuFromHistory(uint32_t Rt, double L_curr) {
+        if (history_map_.empty() && pending_frame_map_.empty()) {
+            NS_LOG_DEBUG("OSCC: HistoryMap and PendingFrameMap empty, using default mu=1.0");
+            return 1.0;  // 初始默认值
+        }
+        
+        // 首先在 HistoryMap 中查找
+        auto it = history_map_.find(Rt);
+        
+        // 情况 1: HistoryMap 中精确命中
+        if (it != history_map_.end()) {
+            double new_mu = AdjustMuByLoss(it->second.mu, it->second.recorded_loss, L_curr);
+            NS_LOG_DEBUG("OSCC: Exact match in HistoryMap for Rt=" << Rt 
+                        << ", L_prev=" << it->second.recorded_loss 
+                        << ", L_curr=" << L_curr << ", mu: " << it->second.mu << " -> " << new_mu);
+            return new_mu;
+        }
+        
+        // 情况 2: HistoryMap 中没有，从 pending_frame_map_ 中查找（按帧 ID 从新到旧）
+        double pending_mu = GetMuFromPendingFrames(Rt);
+        if (pending_mu != 1.0) {
+            // 找到了 pending_frame_map_ 中的 mu，使用它
+            NS_LOG_DEBUG("OSCC: Found mu in PendingFrameMap for Rt=" << Rt 
+                        << ", mu=" << pending_mu);
+            return pending_mu;
+        }
+        
+        // 情况 3: 都没有找到，使用邻近更新原则
+        if (!history_map_.empty()) {
+            // 获取历史 Rt 范围
+            uint32_t min_rt = history_map_.begin()->first;
+            uint32_t max_rt = history_map_.rbegin()->first;
+            
+            // 情况 3a: 大于最大值 (激进策略)
+            if (Rt > max_rt) {
+                double mu_max_hist = history_map_.rbegin()->second.mu;
+                double new_mu = ClipMu(mu_max_hist + epsilon_);
+                NS_LOG_DEBUG("OSCC: Rt=" << Rt << " > max_rt=" << max_rt 
+                            << ", aggressive: mu " << mu_max_hist << " -> " << new_mu);
+                return new_mu;
             }
-            last_frame_is_keyframe_ = is_keyframe;  // 更新记录
-            return;
+            
+            // 情况 3b: 小于最小值 (保守策略)
+            if (Rt < min_rt) {
+                double mu_min_hist = history_map_.begin()->second.mu;
+                double new_mu = ClipMu(mu_min_hist - epsilon_);
+                NS_LOG_DEBUG("OSCC: Rt=" << Rt << " < min_rt=" << min_rt 
+                            << ", conservative: mu " << mu_min_hist << " -> " << new_mu);
+                return new_mu;
+            }
+            
+            // 情况 3c: 位于区间内，找 lower_bound 邻居
+            auto lower = history_map_.lower_bound(Rt);
+            if (lower != history_map_.begin()) {
+                --lower;  // 找到比 Rt 小的最大邻居
+                double new_mu = AdjustMuByLoss(lower->second.mu, lower->second.recorded_loss, L_curr);
+                NS_LOG_DEBUG("OSCC: Rt=" << Rt << " in range, neighbor Rt=" << lower->first 
+                            << ", L_prev=" << lower->second.recorded_loss 
+                            << ", L_curr=" << L_curr << ", mu: " << lower->second.mu << " -> " << new_mu);
+                return new_mu;
+            }
         }
         
-        // 首帧不调整，只记录QoE
-        if (frame_id == 0 || last_frame_qoe_ == 0.0) {
-            last_frame_qoe_ = current_qoe;
-            last_frame_is_keyframe_ = is_keyframe;
-            NS_LOG_DEBUG("OSCC Inter-frame: first frame, recording QoE=" << current_qoe);
-            return;
+        NS_LOG_DEBUG("OSCC: Fallback to default mu=1.0");
+        return 1.0;  // 回退默认值
+    }
+    
+    // 根据丢包率变化调整 mu
+    double AdjustMuByLoss(double mu_prev, double L_prev, double L_curr) {
+        if (L_curr < L_prev) {
+            return ClipMu(mu_prev + epsilon_);  // 情况变好，更激进
+        } else if (L_curr > L_prev) {
+            return ClipMu(mu_prev - epsilon_);  // 情况变差，更保守
+        }
+        return mu_prev;  // 相等，保持不变
+    }
+    
+    // 帧边界处理：清空当前帧缓存，准备新帧（HistoryMap 不再被替换，而是全局维护）
+    void OnNewFrameStart(uint32_t new_frame_id) {
+        // 不再清空和替换 HistoryMap，只清空当前帧缓存
+        // HistoryMap 是全局维护的，会在帧完成时更新
+        
+        NS_LOG_DEBUG("OSCC: Frame " << current_frame_id_ << " -> " << new_frame_id 
+                    << ", clearing frame cache, HistoryMap remains global");
+        
+        std::cout << "[OSCC] New frame " << new_frame_id << " started, frame cache cleared" << std::endl;
+        std::cout << "[OSCC] Global HistoryMap maintained with " << history_map_.size() << " Rt entries" << std::endl;
+        
+        // 清空缓存，准备新帧
+        current_frame_cache_.clear();
+        current_frame_id_ = new_frame_id;
+    }
+    
+    // 记录mu变化（用于日志输出）
+    void RecordMuChange(uint32_t frame_id, uint32_t Rt, double new_mu, double loss_rate) {
+        // 获取旧的mu值用于记录
+        double old_mu = 1.0;
+        auto hist_it = history_map_.find(Rt);
+        if (hist_it != history_map_.end()) {
+            old_mu = hist_it->second.mu;
+        } else if (!history_map_.empty()) {
+            // 尝试找到邻居的mu
+            auto lower = history_map_.lower_bound(Rt);
+            if (lower != history_map_.begin()) {
+                --lower;
+                old_mu = lower->second.mu;
+            } else if (Rt > history_map_.rbegin()->first) {
+                old_mu = history_map_.rbegin()->second.mu;
+            } else {
+                old_mu = history_map_.begin()->second.mu;
+            }
         }
         
-        if (current_qoe > last_frame_qoe_) {
-            // QoE提升，可以更激进
-            current_mu_ += epsilon_;
-            adjusted = true;
-            NS_LOG_DEBUG("OSCC Inter-frame: QoE improved (" << last_frame_qoe_ << " -> " 
-                        << current_qoe << "), mu increased");
-        } else if (current_qoe < last_frame_qoe_) {
-            // QoE下降，需要更保守
-            current_mu_ -= epsilon_;
-            adjusted = true;
-            NS_LOG_DEBUG("OSCC Inter-frame: QoE degraded (" << last_frame_qoe_ << " -> " 
-                        << current_qoe << "), mu decreased");
-        }
-        // QoE相同则不调整
-        
-        // 约束μ在有效范围内
-        current_mu_ = ClipMu(current_mu_);
-        
-        // 更新上一帧QoE和关键帧状态
-        last_frame_qoe_ = current_qoe;
-        last_frame_is_keyframe_ = is_keyframe;  // 新增：更新关键帧状态
-        
-        // 记录μ变化
-        if (adjusted && old_mu != current_mu_) {
+        if (std::abs(old_mu - new_mu) > 0.001) {
             total_adjustments_++;
-            MuChangeRecord record(Simulator::Now(), frame_id, 0, old_mu, current_mu_,
-                                 "inter_frame", 0.0, current_qoe);
+            MuChangeRecord record(Simulator::Now(), frame_id, Rt, old_mu, new_mu,
+                                 "rt_lookup", loss_rate, 0.0);
             mu_change_records_.push_back(record);
             
-            std::cout << "[OSCC] Inter-frame adjustment: frame=" << frame_id 
-                     << ", mu: " << old_mu << " -> " << current_mu_
-                     << ", QoE=" << current_qoe << std::endl;
-            
-            // 关键修复：直接应用新μ值到WebrtcSender
-            ApplyMuToSender(current_mu_);
+            std::cout << "[OSCC] Rt-lookup adjustment: frame=" << frame_id 
+                     << ", Rt=" << Rt << ", mu: " << old_mu << " -> " << new_mu
+                     << ", loss=" << loss_rate << std::endl;
         }
     }
     
@@ -505,23 +611,43 @@ private:
         return std::max(mu_min_, std::min(mu_max_, mu));
     }
     
+    // 从当前帧缓存更新全局 HistoryMap（实现在 RLStateManager 类定义之后）
+    void UpdateHistoryMapFromCurrentFrame(uint32_t frame_id, RLStateManager* rl_manager);
+    
+    // ============================================================================
     // 核心参数
+    // ============================================================================
     double epsilon_;      // 调整步长
     double mu_min_;       // μ下限
     double mu_max_;       // μ上限
-    double current_mu_;   // 当前μ值
     
-    // 历史记录
-    std::map<uint32_t, double> last_frame_rt_loss_;     // 上一帧各Rt组丢包率
-    std::map<uint32_t, double> current_frame_rt_loss_;  // 当前帧各Rt组丢包率
+    // ============================================================================
+    // 基于Rt的历史查表数据结构
+    // ============================================================================
+    
+    // HistoryMap: 全局的 {Rt -> (mu, loss)}，初始包含 Rt=0~10，后续会动态更新和扩展
+    std::map<uint32_t, RtHistoryEntry> history_map_;
+    
+    // CurrentFrameCache: 当前帧的 {Rt -> mu}
+    std::map<uint32_t, double> current_frame_cache_;
+    
+    // PendingFrameMap: 待判定帧的临时数据 {frame_id -> PendingFrameData}
+    // 用于基于 Reward 的滞后更新机制
+    std::map<uint32_t, PendingFrameData> pending_frame_map_;
+    
+    // LossWindow: 最近 LOSS_WINDOW_SIZE 个包的丢包状态 (true = 丢包, false = 成功)
+    std::deque<bool> loss_window_;
+    
+    // ============================================================================
+    // QoE统计（仅用于记录，不影响mu调整）
+    // ============================================================================
     std::map<uint32_t, double> frame_qoe_history_;      // 帧QoE历史
     std::map<uint32_t, FrameQoEDetail> frame_qoe_details_;  // 帧QoE详细信息
-    double last_frame_qoe_;          // 上一帧QoE
-    uint32_t last_frame_max_rt_;     // 上一帧最大Rt值
-    uint32_t last_frame_min_rt_;     // 上一帧最小Rt值
+    
+    // ============================================================================
+    // 状态变量
+    // ============================================================================
     uint32_t current_frame_id_;      // 当前帧ID
-    uint32_t current_frame_last_rt_; // 当前帧内上一个Rt值
-    bool last_frame_is_keyframe_;    // 上一帧是否是关键帧
     
     // 控制标志
     bool oscc_enabled_;
@@ -529,6 +655,13 @@ private:
     // 统计和日志
     std::vector<MuChangeRecord> mu_change_records_;  // μ变化记录
     uint32_t total_adjustments_;                      // 总调整次数
+    
+    // ============================================================================
+    // Rt 预估相关参数（发送端使用）
+    // ============================================================================
+    Time estimated_rtt_ = MilliSeconds(30);           // 预估 RTT
+    double estimated_bandwidth_bps_ = 20000000.0;     // 预估带宽 (bps)
+    Time current_frame_deadline_ = Seconds(0);        // 当前帧截止时间
     
     // WebrtcSender引用（用于直接应用μ值到发送端）
     Ptr<WebrtcSender> webrtc_sender_ = nullptr;
@@ -942,7 +1075,7 @@ public:
     
     // 设置μ值（由OSCC调用）
     void SetMu(double mu) {
-        if (mu >= 0.8 && mu <= 1.2) {
+        if (mu >= 0.5 && mu <= 1.5) {
             current_mu = mu;
             NS_LOG_DEBUG("RLStateManager: mu set to " << mu);
         }
@@ -1068,6 +1201,228 @@ private:
     OSCCController* oscc_controller_ = nullptr;
     bool oscc_enabled_ = false;
 };
+
+// OSCCController::OnFrameComplete 实现（需要在 RLStateManager 定义之后）
+void OSCCController::OnFrameComplete(uint32_t frame_id, double frame_qoe,
+                  double bandwidth_utilization, double loss_rate,
+                  double delay_metric, double delay_avg, double ddl_miss_rate,
+                  double qoe_recv, double qoe_delay,
+                  double qoe_loss, double qoe_ddl,
+                  RLStateManager* rl_manager) {
+    if (!oscc_enabled_) {
+        return;
+    }
+    
+    // 不立即更新 HistoryMap，而是将当前帧数据放入 pending_frame_map_
+    // 等待该帧所有包的 ACK 返回后，根据 Reward 比较结果决定是否更新 HistoryMap
+    PendingFrameData pending_frame;
+    pending_frame.frame_id = frame_id;
+    pending_frame.frame_complete_time = Simulator::Now();
+    pending_frame.frame_finalized = false;
+    
+    // 从 current_frame_cache_ 和 RLStateManager 获取当前帧的 Rt-mu-loss 信息
+    double L_curr = GetCurrentWindowLoss();
+    const auto& rt_group_records = rl_manager ? rl_manager->GetRtGroupRecords() : std::vector<RtGroupRewardRecord>();
+    
+    for (const auto& cache_entry : current_frame_cache_) {
+        uint32_t rt = cache_entry.first;
+        double mu = cache_entry.second;
+        
+        // 从 Rt 组记录中查找对应的 loss_rate
+        double rt_loss = L_curr;  // 默认使用滑动窗口丢包率
+        for (const auto& rt_record : rt_group_records) {
+            if (rt_record.frame_id == frame_id && rt_record.Rt_value == rt) {
+                rt_loss = rt_record.loss_rate;
+                break;
+            }
+        }
+        
+        // 创建 PendingRtData
+        PendingRtData rt_data;
+        rt_data.mu = mu;
+        rt_data.loss_rate = rt_loss;
+        rt_data.reward_sum = 0.0;  // 初始化为 0，等待 ACK 返回时累加
+        rt_data.packet_count = 0;   // 初始化为 0，等待 ACK 返回时累加
+        rt_data.all_packets_received = false;
+        
+        // 从 HistoryMap 获取上一个决策的 mu（用于后续比较）
+        auto hist_it = history_map_.find(rt);
+        if (hist_it != history_map_.end()) {
+            rt_data.prev_mu = hist_it->second.mu;
+        } else {
+            // 如果 HistoryMap 中没有该 Rt，尝试从 pending_frame_map_ 中查找（按帧 ID 从新到旧）
+            rt_data.prev_mu = GetMuFromPendingFrames(rt);
+        }
+        rt_data.prev_reward_sum = 0.0;  // 需要从历史记录中获取，暂时设为 0
+        rt_data.prev_packet_count = 0;   // 需要从历史记录中获取，暂时设为 0
+        
+        pending_frame.rt_data_map[rt] = rt_data;
+    }
+    
+    // 将待判定帧数据存入 pending_frame_map_
+    pending_frame_map_[frame_id] = pending_frame;
+    
+    std::cout << "[OSCC] Frame " << frame_id << " complete, added to pending_frame_map_ with " 
+              << pending_frame.rt_data_map.size() << " Rt entries" << std::endl;
+    std::cout << "[OSCC] Waiting for ACK feedback to determine HistoryMap update..." << std::endl;
+    
+    // 保存当前帧QoE详细信息（仅用于统计，不影响mu调整）
+    FrameQoEDetail detail;
+    detail.frame_id = frame_id;
+    detail.bandwidth_utilization = bandwidth_utilization;
+    detail.loss_rate = loss_rate;
+    detail.delay_metric = delay_metric;
+    detail.delay_avg = delay_avg;
+    detail.ddl_miss_rate = ddl_miss_rate;
+    detail.qoe_recv = qoe_recv;
+    detail.qoe_delay = qoe_delay;
+    detail.qoe_loss = qoe_loss;
+    detail.qoe_ddl = qoe_ddl;
+    detail.qoe = frame_qoe;
+    detail.mu = GetCurrentMu();  // 获取最近使用的mu
+    detail.timestamp = Simulator::Now();
+    
+    frame_qoe_details_[frame_id] = detail;
+    frame_qoe_history_[frame_id] = frame_qoe;
+    
+    NS_LOG_INFO("OSCC: Frame complete - frame=" << frame_id << ", QoE=" << frame_qoe);
+}
+
+// OSCCController::OnPacketAckReceived 实现
+void OSCCController::OnPacketAckReceived(uint32_t frame_id, uint32_t Rt, double reward, double loss_rate) {
+    if (!oscc_enabled_) {
+        return;
+    }
+    
+    // 查找对应的待判定帧
+    auto frame_it = pending_frame_map_.find(frame_id);
+    if (frame_it == pending_frame_map_.end()) {
+        // 如果该帧不在 pending_frame_map_ 中，可能是已经判定完成或还未开始
+        return;
+    }
+    
+    PendingFrameData& pending_frame = frame_it->second;
+    if (pending_frame.frame_finalized) {
+        // 该帧已经判定完成，不再更新
+        return;
+    }
+    
+    // 查找对应的 Rt 数据
+    auto rt_it = pending_frame.rt_data_map.find(Rt);
+    if (rt_it == pending_frame.rt_data_map.end()) {
+        // 如果该 Rt 不在 pending_frame 中，可能是该帧没有使用该 Rt
+        return;
+    }
+    
+    PendingRtData& rt_data = rt_it->second;
+    
+    // 累加 reward 和包数量
+    rt_data.reward_sum += reward;
+    rt_data.packet_count++;
+    rt_data.loss_rate = loss_rate;  // 更新 loss_rate（使用最新的）
+    
+    NS_LOG_DEBUG("OSCC: Packet ACK received - frame=" << frame_id << ", Rt=" << Rt 
+                << ", reward=" << reward << ", total_reward=" << rt_data.reward_sum 
+                << ", packet_count=" << rt_data.packet_count);
+}
+
+// OSCCController::CheckAndUpdateHistoryMap 实现（需要在 RLStateManager 定义之后）
+void OSCCController::CheckAndUpdateHistoryMap(uint32_t frame_id, RLStateManager* rl_manager) {
+    if (!oscc_enabled_ || !rl_manager) {
+        return;
+    }
+    
+    auto frame_it = pending_frame_map_.find(frame_id);
+    if (frame_it == pending_frame_map_.end()) {
+        return;
+    }
+    
+    PendingFrameData& pending_frame = frame_it->second;
+    if (pending_frame.frame_finalized) {
+        return;
+    }
+    
+    // 从 RLStateManager 获取该帧的所有 Rt 组记录，确定每个 Rt 的总包数
+    const auto& rt_group_records = rl_manager->GetRtGroupRecords();
+    std::map<uint32_t, uint32_t> rt_total_packets;  // {Rt -> total_packet_count}
+    
+    for (const auto& rt_record : rt_group_records) {
+        if (rt_record.frame_id == frame_id) {
+            rt_total_packets[rt_record.Rt_value] = rt_record.packet_count;
+        }
+    }
+    
+    // 检查每个 Rt 是否所有包都已收到 ACK
+    bool all_rt_complete = true;
+    for (auto& rt_pair : pending_frame.rt_data_map) {
+        uint32_t rt = rt_pair.first;
+        PendingRtData& rt_data = rt_pair.second;
+        
+        // 检查是否所有包都已收到
+        auto total_it = rt_total_packets.find(rt);
+        if (total_it != rt_total_packets.end()) {
+            if (rt_data.packet_count >= total_it->second) {
+                rt_data.all_packets_received = true;
+            } else {
+                all_rt_complete = false;
+            }
+        } else {
+            // 如果没有找到总包数，假设还未完成
+            all_rt_complete = false;
+        }
+    }
+    
+    // 如果所有 Rt 的包都已收到 ACK，进行 Reward 比较并更新 HistoryMap
+    if (all_rt_complete) {
+        for (auto& rt_pair : pending_frame.rt_data_map) {
+            uint32_t rt = rt_pair.first;
+            PendingRtData& rt_data = rt_pair.second;
+            
+            // 计算当前 mu 的平均 reward
+            double current_avg_reward = (rt_data.packet_count > 0) ? 
+                (rt_data.reward_sum / rt_data.packet_count) : 0.0;
+            
+            // 计算上一个决策的平均 reward（从 HistoryMap 或 pending_frame_map_ 中获取）
+            double prev_avg_reward = 0.0;
+            if (rt_data.prev_packet_count > 0) {
+                prev_avg_reward = rt_data.prev_reward_sum / rt_data.prev_packet_count;
+            } else {
+                // 如果上一个决策没有 reward 数据，假设 reward 为 0（保守策略）
+                prev_avg_reward = 0.0;
+            }
+            
+            // 比较 reward：如果当前 mu 的 reward 更好，更新 HistoryMap
+            if (current_avg_reward > prev_avg_reward) {
+                // 当前 mu 的 reward 更好，更新 HistoryMap
+                history_map_[rt] = RtHistoryEntry(rt_data.mu, rt_data.loss_rate);
+                
+                std::cout << "[OSCC] Frame " << frame_id << ", Rt=" << rt 
+                          << ": Current mu=" << rt_data.mu << " (reward=" << current_avg_reward 
+                          << ") > Prev mu=" << rt_data.prev_mu << " (reward=" << prev_avg_reward 
+                          << "), UPDATED HistoryMap" << std::endl;
+                
+                NS_LOG_INFO("OSCC: Updated HistoryMap - Frame=" << frame_id << ", Rt=" << rt 
+                           << ", mu=" << rt_data.mu << ", loss=" << rt_data.loss_rate 
+                           << ", reward=" << current_avg_reward);
+            } else {
+                // 当前 mu 的 reward 没有更好，不更新 HistoryMap
+                std::cout << "[OSCC] Frame " << frame_id << ", Rt=" << rt 
+                          << ": Current mu=" << rt_data.mu << " (reward=" << current_avg_reward 
+                          << ") <= Prev mu=" << rt_data.prev_mu << " (reward=" << prev_avg_reward 
+                          << "), NOT updated HistoryMap" << std::endl;
+                
+                NS_LOG_INFO("OSCC: HistoryMap NOT updated - Frame=" << frame_id << ", Rt=" << rt 
+                           << ", current_reward=" << current_avg_reward 
+                           << " <= prev_reward=" << prev_avg_reward);
+            }
+        }
+        
+        // 标记该帧已判定完成
+        pending_frame.frame_finalized = true;
+        
+        std::cout << "[OSCC] Frame " << frame_id << " finalized, HistoryMap update decision completed" << std::endl;
+    }
+}
 
 // 强化学习状态数据结构
 struct RLState {
@@ -1622,20 +1977,36 @@ public:
         double delay_ms = (now - send_time).GetMilliSeconds();
         if (delay_ms < 0) delay_ms = 0;
 
+        // 更新 OSCC 滑动窗口：收到包表示成功，丢包状态为 false
+        if (oscc_controller_ && oscc_controller_->IsEnabled()) {
+            oscc_controller_->UpdateLossWindow(false);  // false = 包成功接收
+        }
+
         // Get network info from trace via BandwidthChanger
         double trace_loss = 0.01;
         double trace_rtt = 30.0;
-        double trace_bw = 20000000.0;
+        double trace_bw = 20000000.0;  // 默认值
         
         if (bw_changer_) {
             uint32_t ts = now.GetMilliSeconds();
             trace_loss = bw_changer_->GetLossAtTime(ts);
             trace_rtt = bw_changer_->GetRTTAtTime(ts);
-            trace_bw = bw_changer_->GetTraceBandwidthAtTime(ts);
+            // 注：不再从trace文件直接获取带宽
+            // trace_bw = bw_changer_->GetTraceBandwidthAtTime(ts);
         }
         
         rl_manager_->UpdateNetworkState(delay_ms, trace_loss, MilliSeconds(trace_rtt));
         
+        // 优先使用平滑后的GCC带宽（真实场景可用）
+        double smoothed_bw = GetSmoothedGccBandwidth(now, 5);  // 前5个样本平均
+        std::cout << "smoothed_bw: " << smoothed_bw << std::endl;
+        if (smoothed_bw > 0) {
+            trace_bw = smoothed_bw;
+        } else if (bw_changer_) {
+            // 仿真场景回退到trace文件
+            trace_bw = bw_changer_->GetTraceBandwidthAtTime(now.GetMilliSeconds());
+        }
+        std::cout << "trace_bw: " << trace_bw << std::endl;
         // Get GCC bandwidth from history
         double gcc_bw = GetNearestGccBandwidth(now);
         if (gcc_bw <= 0) gcc_bw = trace_bw * 0.7; // Fallback
@@ -1673,6 +2044,11 @@ public:
         rl_manager_->RecordPacketState(info.frame_id, packet_idx, mu, Rt, trace_loss, reward, 
                                        send_time, now, frame_stats.playout_deadline, 
                                        bw_util, 0, 0, 0, delay_ms);
+        
+        // 新增：通知 OSCCController 包 ACK 已返回，更新 pending_frame_map_ 中的 reward 统计
+        if (oscc_controller_ && oscc_controller_->IsEnabled()) {
+            oscc_controller_->OnPacketAckReceived(info.frame_id, Rt, reward, trace_loss);
+        }
     }
     
     // Callback from FramePlayoutManager
@@ -1680,7 +2056,7 @@ public:
         if (!oscc_controller_) return;
         
         // Calculate simplified QoE metrics based on stats
-        double bandwidth_utilization = 0.8; // Todo: refine
+        double bandwidth_utilization = 0.5; // Todo: refine
         if (!bandwidth_history_.empty()) {
              BandwidthRecord bw_record = bandwidth_history_.back();
              if (bw_record.trace_bandwidth > 0)
@@ -1706,12 +2082,58 @@ public:
         
         oscc_controller_->OnFrameComplete(stats.frame_id, qoe, bandwidth_utilization, (100-qoe_loss)/100.0, 
                                           frame_delay_ms, frame_delay_ms, ddl_miss_rate, 
-                                          qoe_recv, qoe_delay, qoe_loss, qoe_ddl,
-                                          stats.is_keyframe);  // 新增：传递关键帧标志
+                                          qoe_recv, qoe_delay, qoe_loss, qoe_ddl, rl_manager_);
+        
+        // 新增：检查并更新 HistoryMap（当帧的所有包都反馈完成时）
+        // 注意：这里假设帧完成时所有包都已收到 ACK，实际可能需要延迟检查
+        // 为了简化，我们在帧完成时立即检查，如果包还未全部收到，会在后续包到达时再次检查
+        if (oscc_controller_ && oscc_controller_->IsEnabled() && rl_manager_) {
+            oscc_controller_->CheckAndUpdateHistoryMap(stats.frame_id, rl_manager_);
+        }
                                           
          if (rl_manager_) {
             rl_manager_->SetMu(oscc_controller_->GetCurrentMu());
         }
+    }
+    
+    // ============================================================================
+    // RTCP 反馈处理：更新 OSCC 滑动窗口
+    // ============================================================================
+    
+    // 当检测到丢包时调用（例如通过 RTCP TransportFeedback）
+    void OnPacketLost(uint32_t seq_num) {
+        if (oscc_controller_ && oscc_controller_->IsEnabled()) {
+            oscc_controller_->UpdateLossWindow(true);  // true = 包丢失
+            NS_LOG_DEBUG("QoEIntegrationManager: Packet " << seq_num << " lost, updated LossWindow");
+        }
+    }
+    
+    // 批量处理 TransportFeedback
+    void OnTransportFeedback(const std::vector<bool>& packet_received) {
+        if (!oscc_controller_ || !oscc_controller_->IsEnabled()) return;
+        
+        for (bool received : packet_received) {
+            oscc_controller_->UpdateLossWindow(!received);  // true = lost
+        }
+        
+        NS_LOG_DEBUG("QoEIntegrationManager: Processed " << packet_received.size() 
+                    << " feedback entries, current loss rate: " 
+                    << oscc_controller_->GetCurrentWindowLoss());
+    }
+    
+    // 根据 trace 中的 loss 值模拟丢包反馈
+    void SimulateLossFromTrace() {
+        if (!oscc_controller_ || !oscc_controller_->IsEnabled() || !bw_changer_) return;
+        
+        double trace_loss = bw_changer_->GetLossAtTime(Simulator::Now().GetMilliSeconds());
+        
+        // 根据 trace loss 概率决定是否模拟丢包
+        // 使用简单的随机模拟
+        static std::default_random_engine generator(std::random_device{}());
+        std::uniform_real_distribution<double> distribution(0.0, 1.0);
+        
+        bool packet_lost = (distribution(generator) < trace_loss);
+        oscc_controller_->UpdateLossWindow(packet_lost);
     }
     
     // Bandwidth History (Legacy interface for FrameAwareWebrtcTrace)
@@ -1740,6 +2162,30 @@ public:
             }
         }
         return bw;
+    }
+    
+    // 获取平滑后的GCC带宽（滑动窗口平均）
+    double GetSmoothedGccBandwidth(Time timestamp, int window_size = 5) const {
+        if (bandwidth_history_.empty()) return 0.0;
+        
+        // 收集最近 window_size 个带宽样本
+        std::vector<double> recent_bw;
+        for (auto it = bandwidth_history_.rbegin(); 
+             it != bandwidth_history_.rend() && recent_bw.size() < static_cast<size_t>(window_size); 
+             ++it) {
+            if (it->gcc_bandwidth > 0) {
+                recent_bw.push_back(it->gcc_bandwidth);
+            }
+        }
+        
+        if (recent_bw.empty()) return 0.0;
+        
+        // 计算平均值
+        double sum = 0.0;
+        for (double bw : recent_bw) {
+            sum += bw;
+        }
+        return sum / recent_bw.size();
     }
     
     // Skip Frame Proxy (Legacy interface)
@@ -2468,7 +2914,8 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
                      bool oscc_mode = false,
                      uint32_t fps = 30,
                      const std::string& frame_trace_output = "",
-                     bool skip_frame_enabled = false)
+                     bool skip_frame_enabled = false,
+                     const std::string& base_output_folder = "trace_results")
 {
     std::cout << "\n=== test_app_on_p2p started with Real Video Frame Analysis ===" << std::endl;
     std::cout << "Instance: " << instance << std::endl;
@@ -2548,6 +2995,7 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
     uint32_t default_frame_width = 1920;
     for (int i=0;i<num;i++) {
         std::unique_ptr<WebrtcSessionManager> m(CreateWebrtcSessionManager(time_controller,max_rate*0.1,max_rate*0.2,max_rate,default_frame_height,default_frame_width, fps));
+        // std::unique_ptr<WebrtcSessionManager> m(CreateWebrtcSessionManager(time_controller,max_rate,max_rate*0.1,max_rate*0.2,default_frame_height,default_frame_width, fps));
         sesssion_manager.push_back(std::move(m)); 
     }
     UtilCalculator *calculator=UtilCalculator::Instance();
@@ -2601,7 +3049,7 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
     if (oscc_mode) {
         for (int i = 0; i < num; i++) {
             auto oscc = std::make_unique<OSCCController>();
-            oscc->SetParameters(0.02, 0.8, 1.2, bandwidth_scale_factor);
+            oscc->SetParameters(0.02, 0.5, 1.5, bandwidth_scale_factor);
             oscc->SetEnabled(true);
             rl_managers[i]->SetOSCCController(oscc.get());
             oscc_controllers.push_back(std::move(oscc));
@@ -2668,29 +3116,29 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
         // Frame Playout Trace
         std::string trace_output_file = frame_trace_output;
         if (trace_output_file.empty()) {
-            trace_output_file = prefix + std::to_string(i+1) + "_frame_playout_trace.csv";
+            trace_output_file = base_output_folder + "/" + prefix + std::to_string(i+1) + "_frame_playout_trace.csv";
         }
         frame_playout_managers[i]->ExportFrameTrace(trace_output_file);
         
         // Output Bandwidth History from QoEManager
-        std::string bw_history_file = prefix + std::to_string(i+1) + "_bandwidth_history.csv";
+        std::string bw_history_file = base_output_folder + "/" + prefix + std::to_string(i+1) + "_bandwidth_history.csv";
         qoe_managers[i]->OutputBandwidthHistory(bw_history_file);
         
         // Output Bandwidth Statistics from Trace
-        std::string bw_stats_file = prefix + std::to_string(i+1) + "_mu=" + 
+        std::string bw_stats_file = base_output_folder + "/" + prefix + std::to_string(i+1) + "_mu=" + 
                                 std::to_string(bandwidth_scale_factor) + "_L=" + 
                                 std::to_string(loss_rate) + "_bandwidth_statistics.csv";
         trace_vec[i]->OutputBandwidthStatistics(bw_stats_file, loss_rate);
         
         // Output RL Records
-        rl_managers[i]->OutputStateRecords(prefix + std::to_string(i+1), bandwidth_scale_factor, loss_rate);
-        rl_managers[i]->OutputRtGroupRewards(prefix + std::to_string(i+1), bandwidth_scale_factor, loss_rate);
+        rl_managers[i]->OutputStateRecords(base_output_folder + "/" + prefix + std::to_string(i+1), bandwidth_scale_factor, loss_rate);
+        rl_managers[i]->OutputRtGroupRewards(base_output_folder + "/" + prefix + std::to_string(i+1), bandwidth_scale_factor, loss_rate);
         
         // OSCC Stats
         if (oscc_mode && i < static_cast<int>(oscc_controllers.size()) && oscc_controllers[i]) {
-            std::string mu_trace_file = prefix + std::to_string(i+1) + "_OSCC_mu_trace.csv";
+            std::string mu_trace_file = base_output_folder + "/" + prefix + std::to_string(i+1) + "_OSCC_mu_trace.csv";
             oscc_controllers[i]->OutputMuTrace(mu_trace_file);
-            std::string qoe_file = prefix + std::to_string(i+1) + "_OSCC_qoe.csv";
+            std::string qoe_file = base_output_folder + "/" + prefix + std::to_string(i+1) + "_OSCC_qoe.csv";
             oscc_controllers[i]->OutputFrameQoE(qoe_file);
         }
     }
@@ -2970,4 +3418,6 @@ int main(int argc, char *argv[]){
     return 0;
 }
 
-//./waf --run "scratch/webrtc-TFMN(NQoE) --trace=/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/AItrans_0.log --ls=0.01 --skip=true --oscc=true --folder=trace_results/AItrans_test --it=AItrans_case1" > webrtc_ns3.log 2>&1
+// hjt@ubuntu-Precision-Tower-5810:~/OSCC/ns-allinone-3.31/ns-3.31$ ./waf --run "scratch/webrtc-TFMN(QoE) --trace=/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/AItrans_2.log --ls=0.01 --skip=true --oscc=true --folder=trace_results/AItrans_test --it=AItrans_case1" > webrtc_ns3.log 2>&1
+// hjt@ubuntu-Precision-Tower-5810:~/OSCC/ns-allinone-3.31/ns-3.31$ ./waf --run "scratch/webrtc-TFMN(GCC) --trace=/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/AItrans_2.log --ls=0.01 --skip=true --oscc=true --folder=trace_results/AItrans_test --it=AItrans_case1" > webrtc_ns3.log 2>&1
+//./waf --run "scratch/webrtc-TFMN(QoE) --trace=/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/AItrans_2.log --ls=0.01 --skip=true --oscc=true --folder=trace_results/AItrans_test --it=AItrans_case1" > webrtc_ns3.log 2>&1

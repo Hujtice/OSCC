@@ -177,7 +177,7 @@ public:
     static const size_t LOSS_WINDOW_SIZE = 100;
 
     OSCCController() 
-        : epsilon_(0.00), mu_min_(0.5), mu_max_(1.5),
+        : epsilon_(0.02), mu_min_(0.5), mu_max_(1.5),
           current_frame_id_(0), oscc_enabled_(true), total_adjustments_(0) {
         // 初始化全局 HistoryMap：Rt = 0, 1, 2, ..., 10
         // 每个 Rt 的初始值：loss_rate = 0.05, mu = 1.0 + Rt * 0.05
@@ -1191,8 +1191,6 @@ void OSCCController::UpdateHistoryMapFromCurrentFrame(uint32_t frame_id, RLState
         
         // 从 Rt 组记录中查找对应的 loss_rate
         double rt_loss = L_curr;  // 默认使用滑动窗口丢包率
-        
-        // 查找该帧中该 Rt 对应的 loss_rate
         for (const auto& rt_record : rt_group_records) {
             if (rt_record.frame_id == frame_id && rt_record.Rt_value == rt) {
                 rt_loss = rt_record.loss_rate;
@@ -1209,22 +1207,18 @@ void OSCCController::UpdateHistoryMapFromCurrentFrame(uint32_t frame_id, RLState
         double mu = rt_data.second.first;
         double loss = rt_data.second.second;
         
-        // 更新 HistoryMap（如果 Rt 在 0-10 范围内，直接更新；否则添加到 HistoryMap）
-        if (rt <= 10) {
-            // Rt 在初始化范围内，直接更新
-            history_map_[rt] = RtHistoryEntry(mu, loss);
-        } else {
-            // Rt 超出初始化范围，添加到 HistoryMap（扩展全局表）
-            history_map_[rt] = RtHistoryEntry(mu, loss);
-        }
+        // 直接更新 HistoryMap（不使用基于 Reward 的滞后更新）
+        history_map_[rt] = RtHistoryEntry(mu, loss);
         
-        NS_LOG_DEBUG("OSCC: Updated HistoryMap - Rt=" << rt 
+        NS_LOG_INFO("OSCC: Updated HistoryMap - frame=" << frame_id << ", Rt=" << rt 
                     << ", mu=" << mu << ", loss=" << loss);
+        
+        std::cout << "[OSCC] HistoryMap updated: frame=" << frame_id << ", Rt=" << rt 
+                  << ", mu=" << mu << ", loss=" << loss << std::endl;
     }
     
-    std::cout << "[OSCC] Frame " << frame_id << " complete, updated HistoryMap with " 
-              << frame_rt_data.size() << " Rt entries" << std::endl;
-    std::cout << "[OSCC] Global HistoryMap now contains " << history_map_.size() << " Rt entries" << std::endl;
+    NS_LOG_INFO("OSCC: Frame " << frame_id << " complete, HistoryMap updated with " 
+                << frame_rt_data.size() << " Rt entries");
 }
 
 // 强化学习状态数据结构
@@ -2840,7 +2834,7 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
     if (oscc_mode) {
         for (int i = 0; i < num; i++) {
             auto oscc = std::make_unique<OSCCController>();
-            oscc->SetParameters(0.00, 0.5, 1.5, bandwidth_scale_factor);
+            oscc->SetParameters(0.02, 0.5, 1.5, bandwidth_scale_factor);
             oscc->SetEnabled(true);
             rl_managers[i]->SetOSCCController(oscc.get());
             oscc_controllers.push_back(std::move(oscc));
@@ -3211,4 +3205,4 @@ int main(int argc, char *argv[]){
 
 // hjt@ubuntu-Precision-Tower-5810:~/OSCC/ns-allinone-3.31/ns-3.31$ ./waf --run "scratch/webrtc-TFMN(QoE) --trace=/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/AItrans_2.log --ls=0.01 --skip=true --oscc=true --folder=trace_results/AItrans_test --it=AItrans_case1" > webrtc_ns3.log 2>&1
 // hjt@ubuntu-Precision-Tower-5810:~/OSCC/ns-allinone-3.31/ns-3.31$ ./waf --run "scratch/webrtc-TFMN(GCC) --trace=/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/AItrans_2.log --ls=0.01 --skip=true --oscc=true --folder=trace_results/AItrans_test --it=AItrans_case1" > webrtc_ns3.log 2>&1
-//./waf --run "scratch/webrtc-TFMN(QoE) --trace=/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/AItrans_2.log --ls=0.01 --skip=true --oscc=true --folder=trace_results/AItrans_test --it=AItrans_case1" > webrtc_ns3.log 2>&1
+//./waf --run "scratch/webrtc-TFMN(QoEFull) --trace=/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/AItrans_2.log --ls=0.01 --skip=true --oscc=true --folder=trace_results/AItrans_test --it=AItrans_case1" > webrtc_ns3.log 2>&1
