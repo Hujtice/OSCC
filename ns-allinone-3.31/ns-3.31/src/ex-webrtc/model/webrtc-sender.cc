@@ -142,6 +142,7 @@ void WebrtcSender::UpdateMuDynamic(double new_mu) {
 
 uint32_t WebrtcSender::GetScaledBandwidth(uint32_t original_bw) {
     double current_mu = GetCurrentBandwidthScaleFactor();
+    // uint32_t scaled_bw = static_cast<uint32_t>(original_bw);
     uint32_t scaled_bw = static_cast<uint32_t>(original_bw * current_mu);
 
     // simple transient zero protection: if GCC value is zero transiently keep last non-zero for a few rounds

@@ -113,6 +113,11 @@ struct TraceData {
 };
 
 // ============================================================================
+// 前向声明
+// ============================================================================
+class RLStateManager;
+
+// ============================================================================
 // OSCCController 类 - OSCC算法核心控制器
 // 实现基于Rt的精细化历史查表机制进行动态μ调整
 // ============================================================================
@@ -172,14 +177,24 @@ public:
     static const size_t LOSS_WINDOW_SIZE = 100;
 
     OSCCController() 
-        : epsilon_(0.02), mu_min_(0.5), mu_max_(1.5),
+        : epsilon_(0.00), mu_min_(0.5), mu_max_(1.5),
           current_frame_id_(0), oscc_enabled_(true), total_adjustments_(0) {
+        // 初始化全局 HistoryMap：Rt = 0, 1, 2, ..., 10
+        // 每个 Rt 的初始值：loss_rate = 0.05, mu = 1.0 + Rt * 0.05
+        for (uint32_t rt = 0; rt <= 10; ++rt) {
+            double initial_mu = 1.0 + rt * 0.05;  // Rt=0时mu=1.0, Rt=10时mu=1.5
+            double initial_loss = 0.05;
+            history_map_[rt] = RtHistoryEntry(initial_mu, initial_loss);
+        }
+        
         NS_LOG_INFO("OSCCController initialized: epsilon=" << epsilon_ 
                    << ", mu_range=[" << mu_min_ << ", " << mu_max_ << "]");
-        std::cout << "=== OSCCController Initialized (Rt-based Lookup) ===" << std::endl;
+        std::cout << "=== OSCCController Initialized (Global HistoryMap) ===" << std::endl;
         std::cout << "  epsilon: " << epsilon_ << std::endl;
         std::cout << "  mu_range: [" << mu_min_ << ", " << mu_max_ << "]" << std::endl;
         std::cout << "  loss_window_size: " << LOSS_WINDOW_SIZE << std::endl;
+        std::cout << "  Global HistoryMap initialized with Rt=0~10 (11 entries)" << std::endl;
+        std::cout << "  Initial values: loss_rate=0.05, mu=1.0+Rt*0.05" << std::endl;
         std::cout << "=================================================" << std::endl;
     }
     
@@ -280,15 +295,19 @@ public:
                    << ", loss=" << group_loss);
     }
     
-    // 帧完成时调用 - 仅记录统计信息
+    // 帧完成时调用 - 更新全局 HistoryMap 并记录统计信息
     void OnFrameComplete(uint32_t frame_id, double frame_qoe,
                       double bandwidth_utilization, double loss_rate,
                       double delay_metric, double delay_avg, double ddl_miss_rate,
                       double qoe_recv, double qoe_delay,
-                      double qoe_loss, double qoe_ddl) {
+                      double qoe_loss, double qoe_ddl,
+                      RLStateManager* rl_manager = nullptr) {
         if (!oscc_enabled_) {
             return;
         }
+        
+        // 更新全局 HistoryMap：将当前帧的 Rt-loss-mu 信息更新到 HistoryMap
+        UpdateHistoryMapFromCurrentFrame(frame_id, rl_manager);
         
         // 保存当前帧QoE详细信息（仅用于统计，不影响mu调整）
         FrameQoEDetail detail;
@@ -509,22 +528,16 @@ private:
         return mu_prev;  // 相等，保持不变
     }
     
-    // 帧边界处理：用当前帧缓存替换历史表
+    // 帧边界处理：清空当前帧缓存，准备新帧（HistoryMap 不再被替换，而是全局维护）
     void OnNewFrameStart(uint32_t new_frame_id) {
-        // 用当前帧缓存替换历史表
-        if (!current_frame_cache_.empty()) {
-            history_map_.clear();
-            double L_curr = GetCurrentWindowLoss();
-            for (const auto& entry : current_frame_cache_) {
-                history_map_[entry.first] = RtHistoryEntry(entry.second, L_curr);
-            }
-            
-            NS_LOG_DEBUG("OSCC: Frame " << current_frame_id_ << " -> " << new_frame_id 
-                        << ", updated HistoryMap with " << history_map_.size() << " entries");
-            
-            std::cout << "[OSCC] New frame " << new_frame_id << " started, HistoryMap updated with " 
-                      << history_map_.size() << " Rt entries from frame " << current_frame_id_ << std::endl;
-        }
+        // 不再清空和替换 HistoryMap，只清空当前帧缓存
+        // HistoryMap 是全局维护的，会在帧完成时更新
+        
+        NS_LOG_DEBUG("OSCC: Frame " << current_frame_id_ << " -> " << new_frame_id 
+                    << ", clearing frame cache, HistoryMap remains global");
+        
+        std::cout << "[OSCC] New frame " << new_frame_id << " started, frame cache cleared" << std::endl;
+        std::cout << "[OSCC] Global HistoryMap maintained with " << history_map_.size() << " Rt entries" << std::endl;
         
         // 清空缓存，准备新帧
         current_frame_cache_.clear();
@@ -568,6 +581,9 @@ private:
         return std::max(mu_min_, std::min(mu_max_, mu));
     }
     
+    // 从当前帧缓存更新全局 HistoryMap（实现在 RLStateManager 类定义之后）
+    void UpdateHistoryMapFromCurrentFrame(uint32_t frame_id, RLStateManager* rl_manager);
+    
     // ============================================================================
     // 核心参数
     // ============================================================================
@@ -579,7 +595,7 @@ private:
     // 基于Rt的历史查表数据结构
     // ============================================================================
     
-    // HistoryMap: 上一帧的 {Rt -> (mu, loss)}
+    // HistoryMap: 全局的 {Rt -> (mu, loss)}，初始包含 Rt=0~10，后续会动态更新和扩展
     std::map<uint32_t, RtHistoryEntry> history_map_;
     
     // CurrentFrameCache: 当前帧的 {Rt -> mu}
@@ -1151,6 +1167,65 @@ private:
     OSCCController* oscc_controller_ = nullptr;
     bool oscc_enabled_ = false;
 };
+
+// OSCCController::UpdateHistoryMapFromCurrentFrame 实现（需要在 RLStateManager 定义之后）
+void OSCCController::UpdateHistoryMapFromCurrentFrame(uint32_t frame_id, RLStateManager* rl_manager) {
+    if (!rl_manager) {
+        NS_LOG_WARN("OSCC: RLStateManager is null, cannot update HistoryMap from current frame");
+        return;
+    }
+    
+    // 获取当前帧的滑动窗口丢包率
+    double L_curr = GetCurrentWindowLoss();
+    
+    // 从 RLStateManager 获取当前帧的所有 Rt 组记录
+    const auto& rt_group_records = rl_manager->GetRtGroupRecords();
+    
+    // 构建当前帧的 Rt -> (mu, loss) 映射
+    std::map<uint32_t, std::pair<double, double>> frame_rt_data;  // {Rt -> (mu, loss)}
+    
+    // 从 current_frame_cache_ 获取 mu 值
+    for (const auto& cache_entry : current_frame_cache_) {
+        uint32_t rt = cache_entry.first;
+        double mu = cache_entry.second;
+        
+        // 从 Rt 组记录中查找对应的 loss_rate
+        double rt_loss = L_curr;  // 默认使用滑动窗口丢包率
+        
+        // 查找该帧中该 Rt 对应的 loss_rate
+        for (const auto& rt_record : rt_group_records) {
+            if (rt_record.frame_id == frame_id && rt_record.Rt_value == rt) {
+                rt_loss = rt_record.loss_rate;
+                break;
+            }
+        }
+        
+        frame_rt_data[rt] = std::make_pair(mu, rt_loss);
+    }
+    
+    // 更新全局 HistoryMap
+    for (const auto& rt_data : frame_rt_data) {
+        uint32_t rt = rt_data.first;
+        double mu = rt_data.second.first;
+        double loss = rt_data.second.second;
+        
+        // 更新 HistoryMap（如果 Rt 在 0-10 范围内，直接更新；否则添加到 HistoryMap）
+        if (rt <= 10) {
+            // Rt 在初始化范围内，直接更新
+            history_map_[rt] = RtHistoryEntry(mu, loss);
+        } else {
+            // Rt 超出初始化范围，添加到 HistoryMap（扩展全局表）
+            history_map_[rt] = RtHistoryEntry(mu, loss);
+        }
+        
+        NS_LOG_DEBUG("OSCC: Updated HistoryMap - Rt=" << rt 
+                    << ", mu=" << mu << ", loss=" << loss);
+    }
+    
+    std::cout << "[OSCC] Frame " << frame_id << " complete, updated HistoryMap with " 
+              << frame_rt_data.size() << " Rt entries" << std::endl;
+    std::cout << "[OSCC] Global HistoryMap now contains " << history_map_.size() << " Rt entries" << std::endl;
+}
 
 // 强化学习状态数据结构
 struct RLState {
@@ -1805,7 +1880,7 @@ public:
         
         oscc_controller_->OnFrameComplete(stats.frame_id, qoe, bandwidth_utilization, (100-qoe_loss)/100.0, 
                                           frame_delay_ms, frame_delay_ms, ddl_miss_rate, 
-                                          qoe_recv, qoe_delay, qoe_loss, qoe_ddl);
+                                          qoe_recv, qoe_delay, qoe_loss, qoe_ddl, rl_manager_);
                                           
          if (rl_manager_) {
             rl_manager_->SetMu(oscc_controller_->GetCurrentMu());
@@ -2710,8 +2785,8 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
     uint32_t default_frame_height = 1080;
     uint32_t default_frame_width = 1920;
     for (int i=0;i<num;i++) {
-        // std::unique_ptr<WebrtcSessionManager> m(CreateWebrtcSessionManager(time_controller,max_rate*0.1,max_rate*0.2,max_rate,default_frame_height,default_frame_width, fps));
-        std::unique_ptr<WebrtcSessionManager> m(CreateWebrtcSessionManager(time_controller,max_rate,max_rate*0.1,max_rate*0.2,default_frame_height,default_frame_width, fps));
+        std::unique_ptr<WebrtcSessionManager> m(CreateWebrtcSessionManager(time_controller,max_rate*0.1,max_rate*0.2,max_rate,default_frame_height,default_frame_width, fps));
+        // std::unique_ptr<WebrtcSessionManager> m(CreateWebrtcSessionManager(time_controller,max_rate,max_rate*0.1,max_rate*0.2,default_frame_height,default_frame_width, fps));
         sesssion_manager.push_back(std::move(m)); 
     }
     UtilCalculator *calculator=UtilCalculator::Instance();
@@ -2765,7 +2840,7 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
     if (oscc_mode) {
         for (int i = 0; i < num; i++) {
             auto oscc = std::make_unique<OSCCController>();
-            oscc->SetParameters(0.02, 0.5, 1.5, bandwidth_scale_factor);
+            oscc->SetParameters(0.00, 0.5, 1.5, bandwidth_scale_factor);
             oscc->SetEnabled(true);
             rl_managers[i]->SetOSCCController(oscc.get());
             oscc_controllers.push_back(std::move(oscc));
@@ -2831,7 +2906,7 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
     for (int i = 0; i < num; i++) {
         // Frame Playout Trace
         std::string trace_output_file = frame_trace_output;
-        if (!trace_output_file.empty()) {
+        if (trace_output_file.empty()) {
             trace_output_file = base_output_folder + "/" + prefix + std::to_string(i+1) + "_frame_playout_trace.csv";
         }
         frame_playout_managers[i]->ExportFrameTrace(trace_output_file);
@@ -3103,7 +3178,7 @@ int main(int argc, char *argv[]){
     }
     
     // 设置默认帧trace输出路径
-    if (!frame_trace_output.empty()) {
+    if (frame_trace_output.empty()) {
         frame_trace_output = folder + "/" + instance + "_frame_trace.csv";
     }
 
@@ -3136,3 +3211,4 @@ int main(int argc, char *argv[]){
 
 // hjt@ubuntu-Precision-Tower-5810:~/OSCC/ns-allinone-3.31/ns-3.31$ ./waf --run "scratch/webrtc-TFMN(QoE) --trace=/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/AItrans_2.log --ls=0.01 --skip=true --oscc=true --folder=trace_results/AItrans_test --it=AItrans_case1" > webrtc_ns3.log 2>&1
 // hjt@ubuntu-Precision-Tower-5810:~/OSCC/ns-allinone-3.31/ns-3.31$ ./waf --run "scratch/webrtc-TFMN(GCC) --trace=/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/AItrans_2.log --ls=0.01 --skip=true --oscc=true --folder=trace_results/AItrans_test --it=AItrans_case1" > webrtc_ns3.log 2>&1
+//./waf --run "scratch/webrtc-TFMN(QoE) --trace=/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/AItrans_2.log --ls=0.01 --skip=true --oscc=true --folder=trace_results/AItrans_test --it=AItrans_case1" > webrtc_ns3.log 2>&1
