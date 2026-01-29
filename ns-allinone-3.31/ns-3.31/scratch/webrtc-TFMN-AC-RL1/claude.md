@@ -43,7 +43,7 @@ const uint32_t kBwUnit = 1000000;  // 1 Mbps
 
 ## 核心模块详解
 
-### 1. MuLearner（mu_learner.h/cc）
+### 1. MuLearner（mu_learner.h/cc, torch_mu_learner.h/cc）
 
 **职责**: 轻量级强化学习，动态学习 μ 值
 
@@ -56,11 +56,18 @@ class IMuLearner {
 };
 ```
 
-**实现**: `BanditMuLearner` - 基于策略梯度的 bandit 算法
+**实现1**: `BanditMuLearner` - 基于策略梯度的 bandit 算法
 - 输入: (Rt, loss_rate)
 - 输出: μ ∈ [0.5, 1.5]
 - 特征: 线性组合 + sigmoid + 探索噪声
 - 更新: 基于 advantage 的策略梯度
+
+**实现2**: `TorchMLPMuLearner` - 两层神经网络（需要 LibTorch）
+- 网络结构: 2 -> 16(ReLU) -> 8(ReLU) -> 1 -> sigmoid
+- 输入: 归一化的 (Rt, loss_rate)
+- 输出: μ ∈ [0.5, 1.5]
+- 优化器: Adam + 梯度裁剪
+- 更新: 最大化 advantage * mu_pred
 
 ### 2. OSCCController（oscc_controller.h/cc）
 
@@ -164,15 +171,16 @@ void run_single_trace_simulation(...);  // 单 trace 仿真
 
 **命令行参数**:
 ```bash
---trace=<file>      # trace 文件路径（必选）
---mu=<value>        # 初始 μ 值（默认 1.0）
---ls=<value>        # 丢包率（默认 0.01）
---oscc=<bool>       # 启用 OSCC 模式
---learner=<bool>    # 启用 learner 模式（与 OSCC 互斥）
---skip=<bool>       # 启用跳帧逻辑
---fps=<value>       # 帧率（默认 30）
---folder=<dir>      # 输出目录
---it=<instance>     # 实例名称
+--trace=<file>         # trace 文件路径（必选）
+--mu=<value>           # 初始 μ 值（默认 1.0）
+--ls=<value>           # 丢包率（默认 0.01）
+--oscc=<bool>          # 启用 OSCC 模式
+--learner=<bool>       # 启用 learner 模式（与 OSCC 互斥）
+--learner_type=<type>  # learner 类型: "bandit" (默认) 或 "mlp"/"torch" (需要 LibTorch)
+--skip=<bool>          # 启用跳帧逻辑
+--fps=<value>          # 帧率（默认 30）
+--folder=<dir>         # 输出目录
+--it=<instance>        # 实例名称
 ```
 
 ## 模块依赖关系
@@ -227,12 +235,20 @@ cd /home/hjt/OSCC/ns-allinone-3.31/ns-3.31
   --folder=results --it=oscc_test"
 ```
 
-**Learner 模式**:
+**Learner 模式 (Bandit)**:
 ```bash
 ./waf --run "webrtc-TFMN-AC-RL1 \
   --trace=/path/to/trace.log \
-  --learner=true --mu=1.0 --ls=0.01 \
+  --learner=true --learner_type=bandit --mu=1.0 --ls=0.01 \
   --folder=results --it=learner_test"
+```
+
+**Learner 模式 (两层 MLP - 需要 LibTorch)**:
+```bash
+./waf --run "webrtc-TFMN-AC-RL1 \
+  --trace=/path/to/trace.log \
+  --learner=true --learner_type=mlp --mu=1.0 --ls=0.01 \
+  --folder=results --it=mlp_test"
 ```
 
 ### 输出文件
@@ -255,6 +271,8 @@ cd /home/hjt/OSCC/ns-allinone-3.31/ns-3.31
 - **固定模式**: 简单基线，μ 在整个仿真中不变
 - **OSCC 模式**: 基于历史 Rt 查表，根据丢包率动态调整
 - **Learner 模式**: 在线学习策略，根据 (Rt, loss) 输出 μ
+  - **Bandit**: 轻量级策略梯度（3 个参数）
+  - **MLP/Torch**: 两层神经网络（~200 个参数，需要 LibTorch）
 
 ### 3. Rt（Retransmission Opportunities）
 ```
@@ -284,6 +302,8 @@ ns-3 的 waf 构建系统会扫描 `scratch/` 下的所有 `.cc` 文件。保留
 - 固定: 不加 `--oscc` 和 `--learner`
 - OSCC: 加 `--oscc=true`
 - Learner: 加 `--learner=true`（优先级最高）
+  - Bandit: `--learner=true --learner_type=bandit`（默认）
+  - MLP: `--learner=true --learner_type=mlp` 或 `torch`（需要 LibTorch）
 
 ### Q: trace 文件格式？
 **A**: 每行 4 列：`time(s) bandwidth(Mbps) rtt(ms) loss(0-1)`
@@ -309,7 +329,14 @@ ns-3 的 waf 构建系统会扫描 `scratch/` 下的所有 `.cc` 文件。保留
 ### 添加新的 μ 策略
 1. 继承 `IMuLearner` 接口
 2. 实现 `Act()`, `Observe()`, `MaybeUpdate()`
-3. 在 `simulation.cc` 中实例化并连接到 `RLStateManager`
+3. 在 `simulation.cc` 中添加到 learner_type 判断逻辑
+4. （可选）在 `RLStateManager::OutputLearnerLog()` 中添加特定指标输出
+
+### LibTorch 依赖配置（仅用于 TorchMLPMuLearner）
+- **依赖位置**: `/usr/local/libtorch` (可修改 `wscript`)
+- **版本要求**: LibTorch CPU 版（与 C++14 兼容）
+- **编译宏**: 自动注入 `OSCC_USE_TORCH`
+- **运行时**: rpath 自动配置，无需设置 `LD_LIBRARY_PATH`
 
 ### 修改奖励函数
 编辑 `rl_state_manager.cc` 的 `CalculateReward()` 方法。

@@ -15,6 +15,10 @@
 #include "qoe_manager.h"
 #include "webrtc_trace.h"
 
+#ifdef OSCC_USE_TORCH
+#include "torch_mu_learner.h"
+#endif
+
 #include "ns3/webrtc-defines.h"
 #include "ns3/core-module.h"
 #include "ns3/network-module.h"
@@ -96,7 +100,8 @@ void test_app_on_p2p(
     const std::string& frame_trace_output = "",
     bool skip_frame_enabled = false,
     const std::string& base_output_folder = "trace_results",
-    bool learner_mode = false);
+    bool learner_mode = false,
+    const std::string& learner_type = "bandit");
 
 // 运行单个trace仿真
 void run_single_trace_simulation(
@@ -112,7 +117,8 @@ void run_single_trace_simulation(
     uint32_t fps = 30,
     const std::string& frame_trace_output = "",
     bool skip_frame_enabled = false,
-    bool learner_mode = false);
+    bool learner_mode = false,
+    const std::string& learner_type = "bandit");
 
 } // namespace oscc
 

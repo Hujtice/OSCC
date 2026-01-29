@@ -4,6 +4,10 @@
 #include <algorithm>
 #include <iomanip>
 
+#ifdef OSCC_USE_TORCH
+#include "torch_mu_learner.h"
+#endif
+
 namespace oscc {
 
 NS_LOG_COMPONENT_DEFINE("RLStateManager");
@@ -413,15 +417,31 @@ void RLStateManager::OutputLearnerLog(const std::string& filename_prefix, double
     file << "current_mu," << mu_learner_->CurrentMu() << std::endl;
     file << "total_rt_groups," << rt_group_records_.size() << std::endl;
     
+    // 尝试输出 BanditMuLearner 特定参数
     BanditMuLearner* bandit = dynamic_cast<BanditMuLearner*>(mu_learner_);
     if (bandit) {
         const auto& theta = bandit->GetTheta();
+        file << "learner_type,bandit" << std::endl;
         file << "theta_rt," << (theta.size() > 0 ? theta[0] : 0.0) << std::endl;
         file << "theta_loss," << (theta.size() > 1 ? theta[1] : 0.0) << std::endl;
         file << "theta_bias," << (theta.size() > 2 ? theta[2] : 0.0) << std::endl;
         file << "exploration_sigma," << bandit->GetConfig().exploration_sigma << std::endl;
         file << "learning_rate," << bandit->GetConfig().learning_rate << std::endl;
     }
+    
+#ifdef OSCC_USE_TORCH
+    // 尝试输出 TorchMLPMuLearner 特定参数
+    TorchMLPMuLearner* torch_mlp = dynamic_cast<TorchMLPMuLearner*>(mu_learner_);
+    if (torch_mlp) {
+        file << "learner_type,torch_mlp" << std::endl;
+        file << "network_structure,2-16-8-1" << std::endl;
+        file << "update_count," << torch_mlp->GetUpdateCount() << std::endl;
+        file << "last_loss," << torch_mlp->GetLastLoss() << std::endl;
+        file << "exploration_sigma," << torch_mlp->GetConfig().exploration_sigma << std::endl;
+        file << "learning_rate," << torch_mlp->GetConfig().learning_rate << std::endl;
+        file << "grad_clip," << torch_mlp->GetConfig().grad_clip << std::endl;
+    }
+#endif
     
     file.close();
     

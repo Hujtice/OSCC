@@ -217,7 +217,8 @@ void test_app_on_p2p(const std::string& instance, TimeConollerType controller_ty
                      const std::string& trace_filename, double bandwidth_scale_factor,
                      double loss_rate, bool oscc_mode, uint32_t fps,
                      const std::string& frame_trace_output, bool skip_frame_enabled,
-                     const std::string& base_output_folder, bool learner_mode) {
+                     const std::string& base_output_folder, bool learner_mode,
+                     const std::string& learner_type) {
     std::cout << "\n=== test_app_on_p2p started with Real Video Frame Analysis ===" << std::endl;
     std::cout << "Instance: " << instance << std::endl;
     std::cout << "Normalized application time: " << startapptime << "s to " << endapptime << "s" << std::endl;
@@ -323,7 +324,7 @@ void test_app_on_p2p(const std::string& instance, TimeConollerType controller_ty
     std::vector<std::unique_ptr<FramePlayoutManager>> frame_playout_managers;
     std::vector<std::unique_ptr<RLStateManager>> rl_managers;
     std::vector<std::unique_ptr<OSCCController>> oscc_controllers;
-    std::vector<std::unique_ptr<BanditMuLearner>> mu_learners;
+    std::vector<std::unique_ptr<IMuLearner>> mu_learners;
     
     // 初始化 FramePlayoutManager
     for (int i = 0; i < num; i++) {
@@ -360,7 +361,7 @@ void test_app_on_p2p(const std::string& instance, TimeConollerType controller_ty
     
     // 初始化 MuLearner
     if (learner_mode) {
-        std::cout << "\n=== Initializing MuLearners ===" << std::endl;
+        std::cout << "\n=== Initializing MuLearners (type: " << learner_type << ") ===" << std::endl;
         for (int i = 0; i < num; i++) {
             MuLearnerConfig config;
             config.mu_min = 0.5;
@@ -371,8 +372,25 @@ void test_app_on_p2p(const std::string& instance, TimeConollerType controller_ty
             config.grad_clip = 1.0;
             config.rt_max = 20.0;
             config.loss_max = 0.1;
+            config.initial_theta = {0.0, 0.0, 0.0};  // 用于 warm-start
             
-            auto learner = std::make_unique<BanditMuLearner>(config);
+            std::unique_ptr<IMuLearner> learner;
+            
+            if (learner_type == "mlp" || learner_type == "torch") {
+#ifdef OSCC_USE_TORCH
+                learner = std::make_unique<TorchMLPMuLearner>(config);
+                std::cout << "MuLearner " << i << " created as TorchMLPMuLearner (2->16->8->1)" << std::endl;
+#else
+                std::cerr << "ERROR: TorchMLPMuLearner requested but OSCC_USE_TORCH not defined!" << std::endl;
+                std::cerr << "Falling back to BanditMuLearner..." << std::endl;
+                learner = std::make_unique<BanditMuLearner>(config);
+#endif
+            } else {
+                // 默认使用 BanditMuLearner
+                learner = std::make_unique<BanditMuLearner>(config);
+                std::cout << "MuLearner " << i << " created as BanditMuLearner (bandit policy gradient)" << std::endl;
+            }
+            
             rl_managers[i]->SetMuLearner(learner.get());
             mu_learners.push_back(std::move(learner));
             
@@ -515,7 +533,8 @@ void run_single_trace_simulation(const std::string& trace_file, const std::strin
                                  double loss_rate, const std::string& base_output_folder,
                                  double bandwidth_scale_factor, bool oscc_mode,
                                  uint32_t fps, const std::string& frame_trace_output,
-                                 bool skip_frame_enabled, bool learner_mode) {
+                                 bool skip_frame_enabled, bool learner_mode,
+                                 const std::string& learner_type) {
     std::cout << "\n==========================================" << std::endl;
     std::cout << "Starting simulation for: " << trace_file << std::endl;
     std::cout << "Instance: " << instance << std::endl;
@@ -607,7 +626,7 @@ void run_single_trace_simulation(const std::string& trace_file, const std::strin
                    max_bandwith, triggerloss.get(), changer.get(), trace_file, 
                    bandwidth_scale_factor, loss_rate, oscc_mode,
                    fps, frame_trace_output, skip_frame_enabled,
-                   base_output_folder, learner_mode);
+                   base_output_folder, learner_mode, learner_type);
     
     std::cout << "Simulation completed successfully" << std::endl;
     

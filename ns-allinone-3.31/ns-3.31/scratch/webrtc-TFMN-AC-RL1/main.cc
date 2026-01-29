@@ -41,6 +41,7 @@ int main(int argc, char* argv[]) {
     std::string bandwidth_scale("1.0");
     std::string oscc_enabled("false");
     std::string learner_enabled_str("false");
+    std::string learner_type("bandit");
     std::string fps_str("30");
     std::string frame_trace_output("");
     std::string skip_frame_str("false");
@@ -57,6 +58,7 @@ int main(int argc, char* argv[]) {
     cmd.AddValue("mu", "bandwidth_scale_factor", bandwidth_scale);
     cmd.AddValue("oscc", "enable OSCC dynamic mu adjustment", oscc_enabled);
     cmd.AddValue("learner", "enable lightweight RL learner for mu (replaces OSCC)", learner_enabled_str);
+    cmd.AddValue("learner_type", "learner type: 'bandit' (default) or 'mlp'/'torch' (2-layer MLP)", learner_type);
     cmd.AddValue("frame_trace", "frame trace output file path", frame_trace_output);
     cmd.AddValue("fps", "frame rate", fps_str);
     cmd.AddValue("skip", "enable skip frame logic", skip_frame_str);
@@ -121,6 +123,9 @@ int main(int argc, char* argv[]) {
     std::cout << "OSCC mode: " << (oscc_mode ? "ENABLED" : "disabled") << std::endl;
     std::cout << "Learner mode: " << (learner_mode ? "ENABLED (lightweight RL)" : "disabled") << std::endl;
     if (learner_mode) {
+        std::cout << "Learner type: " << learner_type << std::endl;
+    }
+    if (learner_mode) {
         std::cout << "Initial bandwidth scale factor μ: " << mu << " (will be learned online)" << std::endl;
     } else if (oscc_mode) {
         std::cout << "Initial bandwidth scale factor μ: " << mu << " (will be dynamically adjusted)" << std::endl;
@@ -133,7 +138,7 @@ int main(int argc, char* argv[]) {
     
     // 运行仿真
     run_single_trace_simulation(trace_file, instance, controller_type, 1, mb, ls, folder, mu, oscc_mode,
-                               fps, frame_trace_output, skip_frame_enabled, learner_mode);
+                               fps, frame_trace_output, skip_frame_enabled, learner_mode, learner_type);
     
     std::cout << "=== WebRTC TraceAll-Frame with Real Frame Analysis Completed Successfully ===" << std::endl;
     
