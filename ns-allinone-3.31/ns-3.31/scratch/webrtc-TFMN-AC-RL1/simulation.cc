@@ -146,11 +146,13 @@ void InstallWebrtcApplication(Ptr<Node> sender,
         if (sendApp) qoe_manager->SetWebrtcSender(sendApp);
         if (trace) qoe_manager->SetFrameAwareWebrtcTrace(trace);
         
-        OSCCController* oscc = qoe_manager->GetOSCCController();
-        if (oscc && sendApp) {
-            oscc->SetWebrtcSender(sendApp);
-            std::cout << "[DEBUG] WebrtcSender set in OSCCController for direct mu application" << std::endl;
-        }
+        // [暂时注释] OSCCController 尚未实现，后续若添加 OSCCController 类及
+        // QoEIntegrationManager::GetOSCCController() 方法可恢复以下代码
+        // OSCCController* oscc = qoe_manager->GetOSCCController();
+        // if (oscc && sendApp) {
+        //     oscc->SetWebrtcSender(sendApp);
+        //     std::cout << "[DEBUG] WebrtcSender set in OSCCController for direct mu application" << std::endl;
+        // }
     }
     
     if (trace && bandwidth_changer) {
