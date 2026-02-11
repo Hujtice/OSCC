@@ -1,0 +1,57 @@
+#ifndef AI_MU_LEARNER_H
+#define AI_MU_LEARNER_H
+
+#include "common_types.h"
+#include "mu_learner.h"
+#include <memory>
+
+// AiMuLearner: bridge between ns-3 and Python RL agent via ns3-ai (shared memory).
+// Requires ns3-ai module. Python side uses py_interface.Ns3AIRL with same ShmEnv/ShmAction.
+// Shared memory ID must match Python (default 1234).
+
+#include "ns3/ns3-ai-module.h"
+
+namespace oscc {
+
+using namespace ns3;
+
+// ============================================================================
+// AiMuLearner - ns3-ai shared memory adapter implementing IMuLearner
+// ============================================================================
+class AiMuLearner : public IMuLearner {
+public:
+    static constexpr uint16_t kDefaultShmId = 1234;
+
+    AiMuLearner(const MuLearnerConfig& config = MuLearnerConfig(), uint16_t shm_id = kDefaultShmId);
+    virtual ~AiMuLearner();
+
+    // IMuLearner interface
+    MuAction Act(const MuState& state) override;
+    void Observe(const MuExperience& exp) override;
+    void MaybeUpdate() override;
+    double CurrentMu() const override;
+    std::string GetStatusString() const override;
+    double GetThetaNorm() const override;
+    double GetBaseline() const override;
+
+    const MuLearnerConfig& GetConfig() const { return config_; }
+    uint16_t GetShmId() const { return shm_id_; }
+    /** Call before process exit (e.g. before _exit(0)) so Python can release shared memory. */
+    void NotifySimulationEnd();
+
+private:
+    MuLearnerConfig config_;
+    uint16_t shm_id_;
+    std::unique_ptr<Ns3AIRL<ShmEnv, ShmAction, ns3::RLEmptyInfo>> rl_;
+    double last_mu_;
+    double last_reward_;
+    uint8_t last_done_;
+    double baseline_;
+    uint32_t step_count_;
+
+    void WriteStateToEnv(ShmEnv* env, const MuState& state);
+};
+
+} // namespace oscc
+
+#endif // AI_MU_LEARNER_H

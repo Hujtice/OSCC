@@ -9,7 +9,7 @@
 
 #include "common_types.h"
 #include "mu_learner.h"
-#include "gym_mu_learner.h"
+#include "ai_mu_learner.h"
 #include "rl_state_manager.h"
 #include "network_components.h"
 #include "qoe_manager.h"

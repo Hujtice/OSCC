@@ -1,10 +1,10 @@
-# WebRTC TFMN (Gym-RL) 项目地图
+# WebRTC TFMN (ns3-ai RL) 项目地图
 
 > **用途**: 此文件为 AI 编程助手提供项目全局视图，避免逐文件阅读。修改代码前请先参考此文件定位目标模块。
 
 ## 项目概述
 
-基于 ns-3.31 + ns3-gym 的 WebRTC 带宽优化仿真项目。Python 端使用 Stable-Baselines3 训练 RL 智能体，动态调整带宽缩放因子 μ∈[0.5, 1.5]。
+基于 ns-3.31 + **ns3-ai** 的 WebRTC 带宽优化仿真项目。Python 端使用 Stable-Baselines3 训练 RL 智能体，通过**共享内存**与 ns-3 交换观测/动作/奖励，动态调整带宽缩放因子 μ∈[0.5, 1.5]。
 
 **命名空间**: 所有 C++ 代码在 `namespace oscc` 中。
 
@@ -16,9 +16,9 @@ webrtc-TFMN-AC-RL1/
 ├── README.md               # 用户级项目概述
 ├── INSTALL.md              # 详细安装指南（含故障排除）
 │
-├── common_types.h          # 公共数据结构和常量（见下方"核心数据类型"）
+├── common_types.h          # 公共数据结构、常量、ShmEnv/ShmAction（ns3-ai 共享内存布局）
 ├── mu_learner.h            # IMuLearner 纯虚接口类
-├── gym_mu_learner.h/cc     # GymMuLearner - ns3-gym 适配器（条件编译 NS3_OPENGYM）
+├── ai_mu_learner.h/cc      # AiMuLearner - ns3-ai 共享内存适配器（Ns3AIRL<ShmEnv,ShmAction>）
 ├── rl_state_manager.h/cc   # RLStateManager - RL 状态计算、奖励函数、包/Rt分组记录
 ├── network_components.h/cc # BandwidthChanger（trace驱动带宽）+ TriggerRandomLoss（丢包模型）
 ├── qoe_manager.h/cc        # QoEIntegrationManager - 集成所有组件的中枢
@@ -28,7 +28,8 @@ webrtc-TFMN-AC-RL1/
 │
 └── gym_agent/              # Python RL 智能体
     ├── train.py            # 训练脚本（PPO/SAC/TD3，via SB3）
-    ├── requirements.txt    # Python 依赖（gym==0.21.0, SB3, torch, protobuf==3.20.1）
+    ├── ns3ai_env.py        # Ns3AiGymEnv - Gym 环境包装（py_interface.Ns3AIRL ↔ SB3）
+    ├── requirements.txt    # Python 依赖（SB3, torch, gymnasium；py_interface 需单独安装）
     └── README.md           # Python 端使用说明
 ```
 
@@ -39,7 +40,7 @@ main.cc
   └─ simulation.h/cc
        ├─ common_types.h
        ├─ mu_learner.h
-       ├─ gym_mu_learner.h/cc ──→ mu_learner.h, common_types.h, [ns3-opengym]
+       ├─ ai_mu_learner.h/cc ──→ mu_learner.h, common_types.h, [ns3-ai]
        ├─ rl_state_manager.h/cc ──→ common_types.h, mu_learner.h
        ├─ network_components.h/cc ──→ common_types.h
        ├─ qoe_manager.h/cc ──→ rl_state_manager, network_components, mu_learner
@@ -52,7 +53,7 @@ main.cc
 - `ex-webrtc-module`: WebrtcSender, WebrtcReceiver, WebrtcSessionManager
 - `frame-playout-manager`: FramePlayoutManager, FramePacketInfo, FrameStatistics
 - `webrtc-defines`: TimeConollerType, webrtc_register_clock, set_webrtc_trace_folder
-- `opengym` (ns3-gym): OpenGymInterface, OpenGymBoxContainer
+- **`ns3-ai`** (src/ns3-ai): Ns3AIRL, SharedMemoryPool, ShmEnv/ShmAction 与 Python py_interface 共享内存通信
 
 ## 核心数据类型 (common_types.h)
 
@@ -90,6 +91,10 @@ struct RtGroupRewardRecord { frame_id, Rt_value, loss_rate, mu_used, avg_reward,
 
 // 完整 RL 状态
 struct RLState { mu, reward, bandwidth_utilization, p_delay, p_loss, p_mddl, ... };
+
+// ns3-ai 共享内存结构（与 Python ctypes 对齐）
+struct ShmEnv { float norm_rt; float norm_loss; float reward; uint8_t done; };
+struct ShmAction { float mu; };
 ```
 
 ## 核心模块详解
@@ -108,18 +113,19 @@ class IMuLearner {
 };
 ```
 
-### 2. GymMuLearner (gym_mu_learner.h/cc) — ns3-gym 适配器
+### 2. AiMuLearner (ai_mu_learner.h/cc) — ns3-ai 共享内存适配器
 
-**条件编译**: `#ifdef NS3_OPENGYM` 启用真实实现，否则编译为报错退出的 dummy 类。
+**依赖**: ns-3 模块 `ns3-ai`（src/ns3-ai），使用 `Ns3AIRL<ShmEnv, ShmAction, RLEmptyInfo>` 与 Python 通过共享内存通信。
 
 **关键方法**:
-- `Act(MuState)`: 将 state 归一化为 Gym observation（Rt/rt_max, loss/loss_max），通过 `m_interface->GetActionSpaceData()` 获取 Python 端的 action，clip 到 [mu_min, mu_max]
-- `Observe(MuExperience)`: 通过 `m_interface->NotifyReward()` 和 `NotifyGameOver(false)` 将 reward 发送给 Python
-- `SetOpenGymInterface(Ptr<OpenGymInterface>)`: 设置通信接口
+- `Act(MuState)`: 将 state 写入 ShmEnv（norm_rt, norm_loss, 上步 reward/done），`SetCompleted()` 后 `ActionGetter()` 阻塞等待 Python 写入 ShmAction.mu，clip 到 [mu_min, mu_max] 返回
+- `Observe(MuExperience)`: 更新 last_reward_/last_done_，下次 Act 时写入 ShmEnv
+- `NotifySimulationEnd()`: 调用 `rl_->SetFinish()`，供仿真结束前显式调用（避免 _exit 导致 Python 端无法感知结束）
 
-**Gym 环境规格**:
-- Observation Space: `Box(shape=(2,), dtype=float32)` → [norm_Rt ∈ [0,1], norm_loss ∈ [0,1]]
-- Action Space: `Box(shape=(1,), low=0.5, high=1.5, dtype=float32)` → [mu]
+**共享内存规格**（与 Python ns3ai_env.py 中 ctypes 一致）:
+- ShmEnv: norm_rt, norm_loss (float), reward (float), done (uint8)
+- ShmAction: mu (float) ∈ [0.5, 1.5]
+- 默认 shm_id=1234（单流）；多流时 1234+i
 
 ### 3. RLStateManager (rl_state_manager.h/cc) — 状态与奖励计算
 
@@ -146,7 +152,7 @@ reward = 2.5 * U - 10 * p_delay - 10 * p_loss - 10 * p_mddl
 
 **Rt 分组管理**: 每当 (frame_id, Rt) 变化时，FinalizeCurrentRtGroup() 会：
 1. 计算组内平均奖励
-2. 调用 `mu_learner_->Observe(exp)` 将经验发送给 Python
+2. 调用 `mu_learner_->Observe(exp)` 将经验发送给 Python（AiMuLearner 更新 last_reward_）
 3. 调用 `mu_learner_->MaybeUpdate()`
 
 **⚠️ 已知问题**: `OutputLearnerLog()` 中仍引用了 `BanditMuLearner` 和 `TorchMLPMuLearner`（已移除的旧组件），会导致编译错误，需要清理。
@@ -161,7 +167,7 @@ reward = 2.5 * U - 10 * p_delay - 10 * p_loss - 10 * p_mddl
 3. 更新 RLStateManager 网络状态
 4. 获取平滑 GCC 带宽（滑动窗口 size=5）
 5. 计算 Rt（调用 RLStateManager）
-6. **若启用 MuLearner**: 调用 `mu_learner_->Act(MuState{Rt, loss})` 获取 mu 并应用
+6. **若启用 MuLearner**: 调用 `mu_learner_->Act(MuState{Rt, loss})`（AiMuLearner 写 ShmEnv、读 ShmAction）获取 mu 并应用
 7. 计算 reward（调用 RLStateManager.CalculateReward）
 8. 记录包状态（触发 Rt 分组管理，间接调用 Observe 发送经验给 Python）
 
@@ -183,11 +189,12 @@ reward = 2.5 * U - 10 * p_delay - 10 * p_loss - 10 * p_mddl
 
 **核心函数**: `test_app_on_p2p()` 执行完整仿真：
 1. 创建 2 节点 P2P 拓扑（带队列、流量控制）
-2. 初始化 FramePlayoutManager、RLStateManager、GymMuLearner、QoEIntegrationManager
+2. 初始化 FramePlayoutManager、RLStateManager、**AiMuLearner**、QoEIntegrationManager
 3. 创建 FrameAwareWebrtcTrace 并绑定回调
 4. 安装 WebRTC 应用（sender + receiver）
 5. 运行仿真
-6. 输出所有结果文件
+6. 结束前对每个 AiMuLearner 调用 `NotifySimulationEnd()`，再输出结果
+7. 输出所有结果文件
 
 **⚠️ 已知问题**: `InstallWebrtcApplication()` 中引用了 `qoe_manager->GetOSCCController()`，但 QoEIntegrationManager 头文件中无此方法，为旧代码残留。
 
@@ -210,19 +217,20 @@ Trace File ──→ BandwidthChanger ──→ P2P Link (带宽切换)         
                     │   QoEIntegrationManager.OnPacketReceived()                   │
                     │     │ ① 计算 delay, 获取 trace 网络状态                       │
                     │     │ ② 计算 Rt                                              │
-                    │     │ ③ GymMuLearner.Act({Rt,loss}) → mu                     │
+                    │     │ ③ AiMuLearner.Act({Rt,loss}) → 写 ShmEnv, 读 ShmAction  │
                     │     │ ④ 计算 reward                                           │
                     │     │ ⑤ RecordPacketState → Rt分组 → Observe(reward)          │
-                    │     ↓                          ↕ ZMQ/Protobuf               │
+                    │     ↓                          ↕ 共享内存 (ns3-ai)           │
                     └────────────────────────────────┼─────────────────────────────┘
                                                      │
                                           ┌──────────▼──────────┐
                                           │  Python (SB3)       │
-                                          │  PPO / SAC / TD3    │
-                                          │                     │
-                                          │  obs: [Rt, loss]    │
-                                          │  action: [μ]        │
-                                          │  reward: QoE score  │
+                                          │  Ns3AiGymEnv +      │
+                                          │  PPO / SAC / TD3   │
+                                          │  obs: [norm_Rt,    │
+                                          │        norm_loss]  │
+                                          │  action: [μ]       │
+                                          │  reward: QoE score │
                                           └─────────────────────┘
 ```
 
@@ -249,7 +257,7 @@ Trace File ──→ BandwidthChanger ──→ P2P Link (带宽切换)         
 |------|------|--------|
 | `--algorithm` | RL 算法 (PPO/SAC/TD3) | PPO |
 | `--timesteps` | 训练步数 | 100000 |
-| `--port` | ns3-gym 端口 | 5555 |
+| `--shm-id` | 共享内存块 id（需与 ns-3 AiMuLearner 一致） | 1234 |
 | `--model-dir` | 模型保存目录 | ./models |
 | `--log-dir` | TensorBoard 日志目录 | ./logs |
 | `--load-model` | 加载已有模型继续训练 | None |
@@ -271,17 +279,48 @@ Python 端生成：`models/`（模型检查点）、`logs/`（TensorBoard 日志
 
 ## 运行方式
 
+### 前置：安装 ns3-ai（仅首次需要）
+
+**C++ 端**：ns3-ai 已随本仓库放在 `ns-3.31/src/ns3-ai`（v1.0.0），构建 ns-3 时会自动编译。
+
 ```bash
-# 终端1 - ns-3 仿真（先启动，等待 Python 连接）
+cd /home/hjt/OSCC/ns-allinone-3.31/ns-3.31
+./waf configure --enable-examples --enable-tests --disable-python
+./waf build
+```
+
+**Python 端**（注意：waf 依赖 Python 3.8 的 `imp` 模块，训练脚本需 Python 3.12，所以用 `python3.12`/`pip3` 安装和运行）：
+
+安装 py_interface（ns3-ai 的 Python 包，含共享内存 C 扩展）：
+
+```bash
+cd /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/src/ns3-ai/py_interface
+CC=clang pip3 install --user .   # 本机无 gcc，用 clang 编译 C 扩展
+```
+
+再安装 CPU 版 PyTorch 和 SB3 等：
+
+```bash
+# 先装 CPU-only PyTorch（~180MB，GPU 版 ~2GB+）
+pip3 install torch --index-url https://download.pytorch.org/whl/cpu
+# 再装其余依赖
+pip3 install -r scratch/webrtc-TFMN-AC-RL1/gym_agent/requirements.txt
+```
+
+### 启动仿真与训练
+
+```bash
+# 终端1 - ns-3 仿真（先启动，等待 Python 通过共享内存连接）
 cd /home/hjt/OSCC/ns-allinone-3.31/ns-3.31
 ./waf --run "scratch/webrtc-TFMN-AC-RL1/webrtc-TFMN-AC-RL1 \
   --trace=traces/traces/AItrans/AItrans_1.log \
   --skip=true --mu=1.0 --ls=0.01 \
-  --folder=trace_results/gym_training --it=gym_test"
+  --folder=trace_results/ai_training --it=ai_test"
 
-# 终端2 - Python 训练（后启动）
+# 终端2 - Python 训练（后启动，shm_id 默认 1234）
+# 注意：必须用 python3.12，因为 python3 是 3.8（给 waf 用），ML 包装在 3.12 下
 cd scratch/webrtc-TFMN-AC-RL1/gym_agent
-python3 train.py --algorithm PPO --timesteps 100000
+python3.12 train.py --algorithm PPO --timesteps 100000
 ```
 
 ## Trace 文件格式
@@ -298,4 +337,4 @@ python3 train.py --algorithm PPO --timesteps 100000
 1. **rl_state_manager.cc:406-428** — `OutputLearnerLog()` 中 `dynamic_cast<BanditMuLearner*>` 和 `TorchMLPMuLearner*` 引用了已移除的旧类，需要清理或用 `#ifdef` 保护
 2. **simulation.cc:148-153** — `qoe_manager->GetOSCCController()` 调用了 QoEIntegrationManager 未定义的方法，为旧代码残留
 3. **main.cc:20-22** — `std::cout` 被重定向到 `webrtc_simulation.log` 文件，所有 cout 输出不会显示在终端
-4. **simulation.cc:479** — 仿真结束时调用 `_exit(0)` 强制退出，可能导致析构函数未执行
+4. **simulation.cc** — 仿真结束前已对 AiMuLearner 调用 `NotifySimulationEnd()`，再 `_exit(0)`，以便 Python 端能检测结束并释放共享内存

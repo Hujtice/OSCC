@@ -1,6 +1,18 @@
-gym==0.21.0
+# WebRTC MU Learning (ns3-ai)
+# Python 3.10+
+#
+# NOTE: PyTorch (CPU-only) must be installed FIRST via:
+#   pip3 install torch --index-url https://download.pytorch.org/whl/cpu
+# Then install the rest:
+#   pip3 install -r requirements.txt
+
 stable-baselines3>=2.0.0
-torch>=1.11.0
 tensorboard>=2.10.0
-protobuf==3.20.1
-pyzmq>=23.0.0
+numpy>=1.20.0
+
+# gym/gymnasium (SB3 supports both)
+gymnasium>=0.29.0
+
+# ns3-ai Python interface: install from ns-3 source
+#   cd $NS3_ROOT/src/ns3-ai/py_interface && CC=clang pip3 install --user .
+# Package name: ns3_ai (provides py_interface + shm_pool)

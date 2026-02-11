@@ -1,130 +1,71 @@
-# WebRTC MU Learning - Gym Agent
+# WebRTC MU Learning - Python Agent (ns3-ai)
 
-Python-based reinforcement learning agent for optimizing WebRTC bandwidth scaling factor (μ) using ns3-gym.
+Python 端强化学习智能体，通过 **ns3-ai 共享内存** 与 ns-3 仿真交互，优化 WebRTC 带宽缩放因子 μ。
 
-## Prerequisites
+## 依赖
 
-### 1. Install ns3-gym
+### 1. 安装 py_interface（ns3-ai Python 包）
 
 ```bash
-cd /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/contrib
-git clone https://github.com/tkn-tub/ns3-gym.git opengym
-cd ../../
-./waf configure --enable-examples --enable-tests
-./waf build
+cd /path/to/ns-3.31/src/ns3-ai/py_interface
+pip3 install --user .
 ```
 
-### 2. Install Python Dependencies
+### 2. 安装 Python 依赖
 
 ```bash
 cd scratch/webrtc-TFMN-AC-RL1/gym_agent
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 ```
 
-## Quick Start
+## 快速开始
 
-### Training from Scratch
+**终端 1**：先启动 ns-3 仿真。
+
+**终端 2**：再启动训练：
 
 ```bash
-# In terminal 1: Start ns-3 simulation (will wait for Python agent)
-cd /home/hjt/OSCC/ns-allinone-3.31/ns-3.31
-./waf --run "scratch/webrtc-TFMN-AC-RL1/webrtc-TFMN-AC-RL1 \
-  --trace=/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/AItrans_1.log \
-  --skip=true --mu=1.0 --ls=0.01 \
-  --folder=trace_results/gym_training --it=gym_test"
-
-# In terminal 2: Start Python training agent
 cd scratch/webrtc-TFMN-AC-RL1/gym_agent
 python3 train.py --algorithm PPO --timesteps 100000
 ```
 
-### Training Parameters
+### 训练参数
 
-- `--algorithm`: RL algorithm (PPO, SAC, TD3) - **default: PPO**
-- `--timesteps`: Total training steps - **default: 100000**
-- `--port`: ns3-gym communication port - **default: 5555**
-- `--model-dir`: Directory to save models - **default: ./models**
-- `--log-dir`: TensorBoard log directory - **default: ./logs**
-- `--load-model`: Continue training from checkpoint
+- `--algorithm`: 算法 (PPO, SAC, TD3)，默认 PPO
+- `--timesteps`: 总步数，默认 100000
+- `--shm-id`: 共享内存块 id，需与 ns-3 AiMuLearner 一致，默认 1234
+- `--model-dir`: 模型保存目录，默认 ./models
+- `--log-dir`: TensorBoard 日志目录，默认 ./logs
+- `--load-model`: 从检查点继续训练
 
-### Examples
+### 示例
 
 ```bash
-# Train with SAC for 200k steps
 python3 train.py --algorithm SAC --timesteps 200000
-
-# Continue training from checkpoint
-python3 train.py --load-model ./models/PPO_webrtc_mu_20260129_123456_final.zip
-
-# Train with custom directories
-python3 train.py --model-dir ./my_models --log-dir ./my_logs
+python3 train.py --load-model ./models/PPO_webrtc_mu_xxx_final.zip
 ```
 
-## Monitoring Training
+## 环境规格
 
-View training progress with TensorBoard:
+- **Observation**: Box(shape=(2,), low=0, high=1) — [norm_Rt, norm_loss]
+- **Action**: Box(shape=(1,), low=0.5, high=1.5) — [μ]
+- **Reward**: QoE 综合指标（带宽利用率、延迟/丢包/截止时间惩罚）
+
+## 监控
 
 ```bash
 tensorboard --logdir ./logs
-# Open http://localhost:6006 in your browser
+# 浏览器打开 http://localhost:6006
 ```
 
-## Environment Specification
+## 故障排除
 
-- **Observation Space**: Box([Rt, loss_rate], shape=(2,))
-  - `Rt`: Transmission opportunities (normalized to [0, 1])
-  - `loss_rate`: Packet loss rate (normalized to [0, 1])
+- **ModuleNotFoundError: py_interface**：在 `src/ns3-ai/py_interface` 下执行 `pip3 install --user .`
+- **No module named 'shm_pool'**：需完整安装 py_interface（含 C 扩展），不能只复制 py_interface.py
+- 仿真先启动、Python 后启动；shm_id 与 ns-3 端一致（默认 1234）
 
-- **Action Space**: Box([mu], low=0.5, high=1.5, shape=(1,))
-  - `mu`: Bandwidth scaling factor
+## 文件
 
-- **Reward**: Combined metric based on:
-  - Bandwidth utilization
-  - Delay penalty
-  - Loss penalty
-  - Deadline miss penalty
-
-## Troubleshooting
-
-### Connection Error
-
-**Problem**: `Failed to connect to ns-3 simulation`
-
-**Solution**: Make sure:
-1. ns3-gym is installed in `ns-3.31/contrib/opengym`
-2. ns-3 simulation is running before starting Python script
-3. Port 5555 is not blocked by firewall
-
-### Import Error
-
-**Problem**: `ModuleNotFoundError: No module named 'ns3gym'`
-
-**Solution**:
-```bash
-export PYTHONPATH="/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/contrib/opengym/model/ns3gym:$PYTHONPATH"
-```
-
-## Architecture
-
-```
-┌─────────────────┐          ZMQ/Protobuf          ┌──────────────────┐
-│   ns-3 (C++)    │ <────────────────────────────> │  Python Agent    │
-│                 │                                 │                  │
-│  GymMuLearner   │  Observation: [Rt, loss]       │  PPO/SAC/TD3     │
-│  (adapter)      │  Action: [mu]                  │  (SB3 model)     │
-│                 │  Reward: QoE metric            │                  │
-└─────────────────┘                                 └──────────────────┘
-```
-
-## Files
-
-- `train.py`: Main training script
-- `requirements.txt`: Python dependencies
-- `README.md`: This file
-
-## Next Steps
-
-1. Experiment with different algorithms (PPO, SAC, TD3)
-2. Tune hyperparameters (learning rate, batch size, etc.)
-3. Try different network traces
-4. Visualize learned policy behavior
+- `train.py`: 训练入口
+- `ns3ai_env.py`: Ns3AiGymEnv（Gym 包装 py_interface.Ns3AIRL）
+- `requirements.txt`: 依赖列表

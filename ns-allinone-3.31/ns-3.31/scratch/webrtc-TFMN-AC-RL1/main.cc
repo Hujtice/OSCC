@@ -109,10 +109,10 @@ int main(int argc, char* argv[]) {
         frame_trace_output = folder + "/" + instance + "_frame_trace.csv";
     }
 
-    std::cout << "Starting single trace simulation with Gym-based RL..." << std::endl;
+    std::cout << "Starting single trace simulation with ns3-ai RL..." << std::endl;
     std::cout << "Max bandwidth: " << mb << " Mbps" << std::endl;
     std::cout << "Loss rate: " << ls << std::endl;
-    std::cout << "Gym Learner mode: ENABLED (Python-based RL via ns3-gym)" << std::endl;
+    std::cout << "AI Learner mode: ENABLED (Python-based RL via ns3-ai)" << std::endl;
     std::cout << "Initial bandwidth scale factor μ: " << mu << " (will be learned by Python agent)" << std::endl;
     std::cout << "FPS: " << fps << std::endl;
     std::cout << "Skip frame: " << (skip_frame_enabled ? "ENABLED" : "DISABLED") << std::endl;

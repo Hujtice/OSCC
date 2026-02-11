@@ -1,207 +1,153 @@
-# 安装指南
+# 安装指南（ns3-ai 版）
 
 ## 系统要求
 
-- **操作系统**: Linux (Ubuntu 18.04+推荐)
+- **操作系统**: Linux (Ubuntu 18.04+ 推荐)
 - **ns-3 版本**: 3.31
-- **Python**: 3.7+
-- **编译器**: g++ 7+ (支持 C++14)
+- **Python**: 3.10+
+- **编译器**: g++ 7+ 或 clang++ 6+ (支持 C++11)
 
-## 第一步：安装 ns3-gym
+## 第一步：ns-3 与 ns3-ai
 
-ns3-gym 是连接 ns-3 (C++) 和 Python RL 算法的关键中间件。
+本仓库已在 `src/ns3-ai` 中包含 ns3-ai v1.0.0，无需单独克隆。
 
 ```bash
-# 进入 ns-3.31 的 contrib 目录
-cd /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/contrib
-
-# 克隆 ns3-gym
-git clone https://github.com/tkn-tub/ns3-gym.git opengym
-
-# 返回 ns-3.31 根目录
-cd ../..
-
-# 重新配置和编译 ns-3
-./waf configure --enable-examples --enable-tests
+cd /path/to/ns-3.31
+./waf configure --enable-examples --enable-tests --disable-python
 ./waf build
 ```
 
-**验证安装**:
-```bash
-# 检查目录是否存在
-ls contrib/opengym
+**验证**：构建输出中应包含 `ns3-ai (no Python)`。
 
-# 应该看到：
-# model/  examples/  doc/  ...
-```
+## 第二步：Python 依赖
 
-## 第二步：安装 Python 依赖
+### 2.1 安装 ns3-ai 的 py_interface（必须）
+
+py_interface 提供共享内存 C 扩展 `shm_pool` 和 Python 封装 `py_interface`。
 
 ```bash
-# 进入 gym_agent 目录
-cd scratch/webrtc-TFMN-AC-RL1/gym_agent
-
-# 安装依赖
-pip install -r requirements.txt
-
-# 或手动安装
-pip install gym==0.21.0 stable-baselines3 torch tensorboard protobuf==3.20.1 pyzmq
+cd /path/to/ns-3.31/src/ns3-ai/py_interface
+pip3 install --user .
 ```
 
-**验证安装**:
-```bash
-# 测试导入
-python3 -c "import gym; import stable_baselines3; import ns3gym; print('All dependencies OK!')"
-```
-
-## 第三步：编译项目
+若编译报错（如 `gcc` 未找到），可指定编译器：
 
 ```bash
-# 返回 ns-3.31 根目录
-cd /home/hjt/OSCC/ns-allinone-3.31/ns-3.31
-
-# 编译项目
-./waf build
+CC=clang pip3 install --user .
+# 或安装 gcc: sudo apt install build-essential
 ```
 
-**注意**：
-- 如果看到 `NS3_OPENGYM` 相关的警告，说明 ns3-gym 可能未正确安装
-- gym_mu_learner.cc 中有条件编译，会在没有 ns3-gym 时给出友好错误提示
-
-## 第四步：准备 Trace 文件
-
-确保有可用的网络 trace 文件：
+**验证**：
 
 ```bash
-ls /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/AItrans_1.log
+python3.12 -c "import py_interface; py_interface.Init(1234, 4096); py_interface.FreeMemory(); print('py_interface OK')"
 ```
 
-Trace 文件格式（每行4列）：
-```
-time(s)  bandwidth(Mbps)  rtt(ms)  loss(0-1)
-0.0      10.0             30.0     0.01
-0.1      9.5              32.0     0.02
-...
-```
+> **注意**：`python3` 指向 Python 3.8（waf 构建系统需要），ML 包安装在 Python 3.12 下，
+> 因此训练相关命令统一用 `python3.12`。`pip3` 已绑定 Python 3.12，直接使用即可。
 
-## 第五步：测试运行
-
-### 测试1：只启动 ns-3 仿真
+### 2.2 安装 PyTorch (CPU) 和 SB3 等
 
 ```bash
-cd /home/hjt/OSCC/ns-allinone-3.31/ns-3.31
+# 先安装 CPU-only PyTorch（~180MB，避免下载 ~2GB+ 的 GPU 版）
+pip3 install torch --index-url https://download.pytorch.org/whl/cpu
+
+# 再安装其余依赖
+cd /path/to/ns-3.31/scratch/webrtc-TFMN-AC-RL1/gym_agent
+pip3 install -r requirements.txt
+```
+
+**验证**：
+
+```bash
+python3.12 -c "from ns3ai_env import Ns3AiGymEnv; print('Ns3AiGymEnv OK')"
+```
+
+（若未安装 py_interface，会提示先安装。）
+
+## 第三步：准备 Trace 文件
+
+确保有可用的网络 trace 文件，例如：
+
+```bash
+ls /path/to/ns-3.31/traces/traces/AItrans/AItrans_1.log
+```
+
+格式（每行 4 列，空格分隔）：`time(s)  bandwidth(Mbps)  rtt(ms)  loss(0-1)`。
+
+## 第四步：测试运行
+
+### 测试 1：仅启动 ns-3
+
+```bash
+cd /path/to/ns-3.31
 ./waf --run "scratch/webrtc-TFMN-AC-RL1/webrtc-TFMN-AC-RL1 \
   --trace=traces/traces/AItrans/AItrans_1.log \
   --mu=1.0 --ls=0.01 --folder=trace_results/test --it=test1"
 ```
 
-**预期输出**:
-```
-=== WebRTC TraceAll-Frame Starting ===
-...
-GymMuLearner initialized (awaiting Python agent connection)
-...
-```
+**预期**：输出中出现 `AiMuLearner Initialized (ns3-ai)`，仿真会等待 Python 连接（第一次 Act 会阻塞在共享内存上）。
 
-仿真会等待 Python 智能体连接。
+### 测试 2：完整训练流程
 
-### 测试2：完整训练流程
+**终端 1**：
 
-**终端 1**:
 ```bash
-cd /home/hjt/OSCC/ns-allinone-3.31/ns-3.31
+cd /path/to/ns-3.31
 ./waf --run "scratch/webrtc-TFMN-AC-RL1/webrtc-TFMN-AC-RL1 \
   --trace=traces/traces/AItrans/AItrans_1.log \
   --skip=true --mu=1.0 --ls=0.01 \
-  --folder=trace_results/gym_test --it=gym1"
+  --folder=trace_results/ai_test --it=ai1"
 ```
 
-**终端 2** (在终端1启动后):
+**终端 2**（在终端 1 启动后）：
+
 ```bash
-cd /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/scratch/webrtc-TFMN-AC-RL1/gym_agent
-python3 train.py --algorithm PPO --timesteps 10000
+cd /path/to/ns-3.31/scratch/webrtc-TFMN-AC-RL1/gym_agent
+python3.12 train.py --algorithm PPO --timesteps 10000
 ```
 
-**预期输出** (终端2):
-```
-==============================
-WebRTC MU Learning - Training Session
-==============================
-Algorithm:        PPO
-Total timesteps:  10000
-...
-[INFO] Connected to ns-3 simulation on port 5555
-...
-```
+**预期**：两端正常交换数据，Python 端有 step 与 reward 输出。
 
 ## 故障排除
 
-### 问题1：ns3-gym 编译失败
+### 问题 1：py_interface 安装失败（gcc 未找到）
 
-**症状**: `waf build` 时出现 opengym 相关错误
+**解决**：指定 CC 为 clang 或安装 build-essential：
 
-**解决**:
 ```bash
-# 检查 protobuf 版本
-protoc --version  # 应该是 3.x
-
-# 如果版本不对，重新安装
-pip install protobuf==3.20.1
+CC=clang pip3 install --user .  # 在 py_interface 目录下
+# 或安装 gcc:
+sudo apt install build-essential
 ```
 
-### 问题2：Python 无法导入 ns3gym
+### 问题 2：Python 报 `ModuleNotFoundError: No module named 'py_interface'`
 
-**症状**: `ModuleNotFoundError: No module named 'ns3gym'`
+**解决**：确保已执行 `pip3 install --user .`（在 `src/ns3-ai/py_interface` 下），且当前 Python 能找到该包（`python3 -c "import sys; print(sys.path)"`）。
 
-**解决**:
+### 问题 3：Python 报 `No module named 'shm_pool'`
+
+**解决**：py_interface 依赖 C 扩展 shm_pool，必须从 `src/ns3-ai/py_interface` 完整安装（`pip3 install --user .`），不能只复制 py_interface.py。
+
+### 问题 4：仿真结束后 Python 不退出 / 共享内存残留
+
+**解决**：仿真结束前会调用 `NotifySimulationEnd()`。若异常退出，可手动清理共享内存：
+
 ```bash
-# 添加到 PYTHONPATH
-export PYTHONPATH="/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/contrib/opengym/model/ns3gym:$PYTHONPATH"
-
-# 或写入 ~/.bashrc
-echo 'export PYTHONPATH="/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/contrib/opengym/model/ns3gym:$PYTHONPATH"' >> ~/.bashrc
-source ~/.bashrc
+# 使用 ns3-ai 提供的脚本（若存在）
+/path/to/ns-3.31/src/ns3-ai/freeshm.sh
+# 或
+ipcrm -M 0x4d2   # 1234 的十六进制，即默认 shm key
 ```
 
-### 问题3：连接超时
+### 问题 5：多流（num>1）时 Python 只连一个
 
-**症状**: `Failed to connect to ns-3 simulation`
-
-**解决**:
-1. 确保先启动 ns-3 仿真（终端1）
-2. 再启动 Python 脚本（终端2）
-3. 检查端口占用：`lsof -i:5555`
-4. 如果端口被占用，可以用 `--port` 参数换一个端口
-
-### 问题4：Gym 版本冲突
-
-**症状**: `gym.error.NameNotFound: Environment 'Ns3-v0' not found`
-
-**解决**:
-```bash
-# 确保使用正确的 gym 版本
-pip install gym==0.21.0 --force-reinstall
-```
+**说明**：当前默认单流，shm_id=1234。若仿真中创建多个 AiMuLearner（1234, 1235, ...），需多进程或多 env 对应多个 shm_id，或仅使用第一个流进行训练。
 
 ## 下一步
 
-安装完成后，请阅读：
-- [README.md](README.md) - 项目概述
-- [claude.md](claude.md) - 完整技术文档
-- [gym_agent/README.md](gym_agent/README.md) - Python 端详细说明
+- [README.md](README.md) - 项目概述  
+- [claude.md](claude.md) - 完整技术文档与数据流  
+- [gym_agent/README.md](gym_agent/README.md) - Python 端参数与用法  
 
-开始训练：
-```bash
-# 终端1：ns-3
-./waf --run "scratch/webrtc-TFMN-AC-RL1/webrtc-TFMN-AC-RL1 --trace=<your_trace> ..."
-
-# 终端2：Python
-cd scratch/webrtc-TFMN-AC-RL1/gym_agent
-python3 train.py --algorithm PPO --timesteps 100000
-```
-
-监控训练进度：
-```bash
-tensorboard --logdir ./logs
-# 访问 http://localhost:6006
-```
+监控训练：`tensorboard --logdir gym_agent/logs`，访问 http://localhost:6006 。

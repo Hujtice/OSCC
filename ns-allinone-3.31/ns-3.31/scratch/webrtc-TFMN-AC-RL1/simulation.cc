@@ -324,7 +324,7 @@ void test_app_on_p2p(const std::string& instance, TimeConollerType controller_ty
     std::vector<std::unique_ptr<QoEIntegrationManager>> qoe_managers;
     std::vector<std::unique_ptr<FramePlayoutManager>> frame_playout_managers;
     std::vector<std::unique_ptr<RLStateManager>> rl_managers;
-    std::vector<std::unique_ptr<GymMuLearner>> gym_learners;
+    std::vector<std::unique_ptr<AiMuLearner>> ai_learners;
     
     // 初始化 FramePlayoutManager
     for (int i = 0; i < num; i++) {
@@ -348,8 +348,8 @@ void test_app_on_p2p(const std::string& instance, TimeConollerType controller_ty
         rl_managers.push_back(std::move(rl));
     }
     
-    // 初始化 GymMuLearner (ns3-gym based)
-    std::cout << "\n=== Initializing GymMuLearners (Python-based via ns3-gym) ===" << std::endl;
+    // 初始化 AiMuLearner (ns3-ai shared memory)
+    std::cout << "\n=== Initializing AiMuLearners (Python-based via ns3-ai) ===" << std::endl;
     for (int i = 0; i < num; i++) {
         MuLearnerConfig config;
         config.mu_min = 0.5;
@@ -358,11 +358,11 @@ void test_app_on_p2p(const std::string& instance, TimeConollerType controller_ty
         config.loss_max = 0.1;
         config.baseline_decay = 0.95;
         
-        auto learner = std::make_unique<GymMuLearner>(config);
+        auto learner = std::make_unique<AiMuLearner>(config, AiMuLearner::kDefaultShmId + i);
         rl_managers[i]->SetMuLearner(learner.get());
-        gym_learners.push_back(std::move(learner));
+        ai_learners.push_back(std::move(learner));
         
-        std::cout << "GymMuLearner " << i << " initialized (awaiting Python agent connection)" << std::endl;
+        std::cout << "AiMuLearner " << i << " initialized (shm_id=" << (AiMuLearner::kDefaultShmId + i) << ", awaiting Python)" << std::endl;
     }
     std::cout << "================================\n" << std::endl;
     
@@ -372,9 +372,9 @@ void test_app_on_p2p(const std::string& instance, TimeConollerType controller_ty
         qoe->SetRLStateManager(rl_managers[i].get());
         qoe->SetBandwidthChanger(changer);
         
-        // 设置 Gym learner
-        if (i < static_cast<int>(gym_learners.size())) {
-            qoe->SetMuLearner(gym_learners[i].get(), true);
+        // 设置 AI learner
+        if (i < static_cast<int>(ai_learners.size())) {
+            qoe->SetMuLearner(ai_learners[i].get(), true);
         }
         qoe_managers.push_back(std::move(qoe));
     }
@@ -438,11 +438,11 @@ void test_app_on_p2p(const std::string& instance, TimeConollerType controller_ty
         rl_managers[i]->OutputStateRecords(base_output_folder + "/" + prefix + std::to_string(i + 1), bandwidth_scale_factor, loss_rate);
         rl_managers[i]->OutputRtGroupRewards(base_output_folder + "/" + prefix + std::to_string(i + 1), bandwidth_scale_factor, loss_rate);
         
-        // Gym learner 输出
-        if (i < static_cast<int>(gym_learners.size()) && gym_learners[i]) {
+        // Ai learner 输出
+        if (i < static_cast<int>(ai_learners.size()) && ai_learners[i]) {
             rl_managers[i]->OutputLearnerLog(base_output_folder + "/" + prefix + std::to_string(i + 1), bandwidth_scale_factor, loss_rate);
-            std::cout << "[Simulation] Final Gym learner status for instance " << i << ": " 
-                      << gym_learners[i]->GetStatusString() << std::endl;
+            std::cout << "[Simulation] Final Ai learner status for instance " << i << ": " 
+                      << ai_learners[i]->GetStatusString() << std::endl;
         }
     }
     
@@ -476,6 +476,13 @@ void test_app_on_p2p(const std::string& instance, TimeConollerType controller_ty
     }
     trace_vec.clear();
     
+    // Redundant safety net: Simulator::Destroy() already triggered SetFinish() via
+    // ScheduleDestroy registered in Ns3AIRL ctor. This explicit call ensures Python
+    // is notified even if ScheduleDestroy didn't fire for some reason.
+    for (auto& learner : ai_learners) {
+        if (learner) learner->NotifySimulationEnd();
+    }
+    
     uint32_t elapse = (get_os_millis() - last);
     std::cout << "run time millis: " << elapse << std::endl;
     _exit(0);
@@ -492,7 +499,7 @@ void run_single_trace_simulation(const std::string& trace_file, const std::strin
     std::cout << "Instance: " << instance << std::endl;
     std::cout << "Max bandwidth: " << max_bandwith << " Mbps" << std::endl;
     std::cout << "Loss rate: " << loss_rate << " (THIS SHOULD BE 0.01, 0.02, etc.)" << std::endl;
-    std::cout << "Gym Learner mode: ENABLED (Python-based RL via ns3-gym)" << std::endl;
+    std::cout << "AI Learner mode: ENABLED (Python-based RL via ns3-ai)" << std::endl;
     std::cout << "Initial bandwidth scale factor μ: " << bandwidth_scale_factor << " (will be learned by Python agent)" << std::endl;
     std::cout << "FPS: " << fps << std::endl;
     std::cout << "Skip frame: " << (skip_frame_enabled ? "ENABLED" : "DISABLED") << std::endl;
