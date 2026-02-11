@@ -12,7 +12,6 @@
 
 #include "common_types.h"
 #include "mu_learner.h"
-#include "oscc_controller.h"
 #include "rl_state_manager.h"
 #include "network_components.h"
 #include "ns3/webrtc-defines.h"
@@ -43,8 +42,6 @@ public:
     QoEIntegrationManager();
 
     // 设置各个组件
-    void SetOSCCController(OSCCController* controller);
-    OSCCController* GetOSCCController() { return oscc_controller_; }
     void SetRLStateManager(RLStateManager* manager);
     void SetBandwidthChanger(BandwidthChanger* changer);
     void SetWebrtcSender(Ptr<WebrtcSender> sender);
@@ -81,7 +78,6 @@ public:
     void OutputBandwidthHistory(const std::string& filename) const;
 
 private:
-    OSCCController* oscc_controller_;
     RLStateManager* rl_manager_;
     BandwidthChanger* bw_changer_;
     Ptr<WebrtcSender> webrtc_sender_;

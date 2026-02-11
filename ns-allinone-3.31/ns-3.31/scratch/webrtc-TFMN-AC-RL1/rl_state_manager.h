@@ -3,7 +3,6 @@
 
 #include "common_types.h"
 #include "mu_learner.h"
-#include "oscc_controller.h"
 #include <fstream>
 
 namespace oscc {
@@ -67,13 +66,6 @@ public:
     double GetCurrentDelay() const { return current_delay_; }
     Time GetCurrentRTT() const { return current_rtt_; }
     
-    // OSCC集成
-    void SetOSCCController(OSCCController* controller);
-    bool IsOSCCEnabled() const;
-    OSCCController* GetOSCCController() { return oscc_controller_; }
-    double GetAdaptiveMu(uint32_t frame_id, uint32_t Rt);
-    void NotifyRtGroupComplete(uint32_t frame_id, uint32_t Rt, double loss);
-    
     // MuLearner集成
     void SetMuLearner(IMuLearner* learner);
     bool IsLearnerEnabled() const;
@@ -109,10 +101,6 @@ private:
     
     RtGroup current_rt_group_;
     std::vector<RtGroupRewardRecord> rt_group_records_;
-    
-    // OSCC集成
-    OSCCController* oscc_controller_;
-    bool oscc_enabled_;
     
     // MuLearner集成
     IMuLearner* mu_learner_;

@@ -12,7 +12,7 @@ FrameAwareWebrtcTrace::FrameAwareWebrtcTrace(QoEIntegrationManager* qoe_manager,
                                              double bandwidth_scale_factor) 
     : qoe_manager_(qoe_manager), rl_manager_(rl_manager), 
       total_bw_changes(0), bandwidth_scale_factor_(bandwidth_scale_factor),
-      m_changer(nullptr), oscc_controller_(nullptr),
+      m_changer(nullptr),
       current_mu(1.0), current_loss_rate(0.01) {
     NS_LOG_INFO("FrameAwareWebrtcTrace created with bandwidth scale factor: " << bandwidth_scale_factor_);
 }
@@ -226,12 +226,6 @@ void FrameAwareWebrtcTrace::OutputBandwidthStatistics(const std::string& filenam
         uint32_t original_bw = std::get<1>(scaled_entry);
         uint32_t scaled_bw = std::get<2>(scaled_entry);
         double scale_factor = std::get<3>(scaled_entry);
-
-        if (oscc_controller_) {
-            double dynamic_mu = GetMuAtTimestamp(timestamp / 1000.0);
-            scale_factor = dynamic_mu;
-            scaled_bw = static_cast<uint32_t>(original_bw * dynamic_mu);
-        }
         
         TraceData trace_data;
         if (m_changer) {
@@ -345,30 +339,12 @@ void FrameAwareWebrtcTrace::SetBandwidthScaleFactor(double factor) {
     NS_LOG_INFO("Bandwidth scale factor updated to: " << bandwidth_scale_factor_);
 }
 
-void FrameAwareWebrtcTrace::SetOSCCController(OSCCController* controller) {
-    oscc_controller_ = controller;
-    NS_LOG_INFO("OSCCController set in FrameAwareWebrtcTrace");
-}
-
 double FrameAwareWebrtcTrace::GetMuAtTimestamp(double timestamp_s) const {
-    if (!oscc_controller_) {
-        return bandwidth_scale_factor_;
+    // Use current mu from RL manager if available
+    if (rl_manager_) {
+        return rl_manager_->GetCurrentMu();
     }
-    
-    const auto& records = oscc_controller_->GetMuChangeRecords();
-    if (records.empty()) {
-        return 1.0;
-    }
-    
-    double mu_at_time = 1.0;
-    for (const auto& record : records) {
-        if (record.timestamp.GetSeconds() <= timestamp_s) {
-            mu_at_time = record.new_mu;
-        } else {
-            break;
-        }
-    }
-    return mu_at_time;
+    return bandwidth_scale_factor_;
 }
 
 } // namespace oscc

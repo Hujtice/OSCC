@@ -39,9 +39,6 @@ int main(int argc, char* argv[]) {
     std::string loss_rate("0.01");
     std::string folder("trace_results");
     std::string bandwidth_scale("1.0");
-    std::string oscc_enabled("false");
-    std::string learner_enabled_str("false");
-    std::string learner_type("bandit");
     std::string fps_str("30");
     std::string frame_trace_output("");
     std::string skip_frame_str("false");
@@ -56,9 +53,6 @@ int main(int argc, char* argv[]) {
     cmd.AddValue("ls", "loss_rate", loss_rate);
     cmd.AddValue("folder", "folder name to collect data", folder);
     cmd.AddValue("mu", "bandwidth_scale_factor", bandwidth_scale);
-    cmd.AddValue("oscc", "enable OSCC dynamic mu adjustment", oscc_enabled);
-    cmd.AddValue("learner", "enable lightweight RL learner for mu (replaces OSCC)", learner_enabled_str);
-    cmd.AddValue("learner_type", "learner type: 'bandit' (default) or 'mlp'/'torch' (2-layer MLP)", learner_type);
     cmd.AddValue("frame_trace", "frame trace output file path", frame_trace_output);
     cmd.AddValue("fps", "frame rate", fps_str);
     cmd.AddValue("skip", "enable skip frame logic", skip_frame_str);
@@ -66,8 +60,6 @@ int main(int argc, char* argv[]) {
     cmd.Parse(argc, argv);
     
     // 解析布尔参数
-    bool oscc_mode = (oscc_enabled == "true" || oscc_enabled == "1" || oscc_enabled == "yes");
-    bool learner_mode = (learner_enabled_str == "true" || learner_enabled_str == "1" || learner_enabled_str == "yes");
     bool skip_frame_enabled = (skip_frame_str == "true" || skip_frame_str == "1" || skip_frame_str == "yes");
     
     // 验证必要参数
@@ -117,28 +109,18 @@ int main(int argc, char* argv[]) {
         frame_trace_output = folder + "/" + instance + "_frame_trace.csv";
     }
 
-    std::cout << "Starting single trace simulation with real frame analysis..." << std::endl;
+    std::cout << "Starting single trace simulation with Gym-based RL..." << std::endl;
     std::cout << "Max bandwidth: " << mb << " Mbps" << std::endl;
     std::cout << "Loss rate: " << ls << std::endl;
-    std::cout << "OSCC mode: " << (oscc_mode ? "ENABLED" : "disabled") << std::endl;
-    std::cout << "Learner mode: " << (learner_mode ? "ENABLED (lightweight RL)" : "disabled") << std::endl;
-    if (learner_mode) {
-        std::cout << "Learner type: " << learner_type << std::endl;
-    }
-    if (learner_mode) {
-        std::cout << "Initial bandwidth scale factor μ: " << mu << " (will be learned online)" << std::endl;
-    } else if (oscc_mode) {
-        std::cout << "Initial bandwidth scale factor μ: " << mu << " (will be dynamically adjusted)" << std::endl;
-    } else {
-        std::cout << "Bandwidth scale factor μ: " << mu << std::endl;
-    }
+    std::cout << "Gym Learner mode: ENABLED (Python-based RL via ns3-gym)" << std::endl;
+    std::cout << "Initial bandwidth scale factor μ: " << mu << " (will be learned by Python agent)" << std::endl;
     std::cout << "FPS: " << fps << std::endl;
     std::cout << "Skip frame: " << (skip_frame_enabled ? "ENABLED" : "DISABLED") << std::endl;
     std::cout << "Frame trace output: " << frame_trace_output << std::endl;
     
     // 运行仿真
-    run_single_trace_simulation(trace_file, instance, controller_type, 1, mb, ls, folder, mu, oscc_mode,
-                               fps, frame_trace_output, skip_frame_enabled, learner_mode, learner_type);
+    run_single_trace_simulation(trace_file, instance, controller_type, 1, mb, ls, folder, mu,
+                               fps, frame_trace_output, skip_frame_enabled);
     
     std::cout << "=== WebRTC TraceAll-Frame with Real Frame Analysis Completed Successfully ===" << std::endl;
     

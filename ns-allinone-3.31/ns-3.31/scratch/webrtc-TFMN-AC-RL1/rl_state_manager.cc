@@ -4,10 +4,6 @@
 #include <algorithm>
 #include <iomanip>
 
-#ifdef OSCC_USE_TORCH
-#include "torch_mu_learner.h"
-#endif
-
 namespace oscc {
 
 NS_LOG_COMPONENT_DEFINE("RLStateManager");
@@ -15,8 +11,7 @@ NS_LOG_COMPONENT_DEFINE("RLStateManager");
 RLStateManager::RLStateManager() 
     : current_mu_(1.0), max_loss_rate_(0.05), 
       current_loss_rate_(0.01), last_packet_Rt_(1), current_rtt_(MilliSeconds(30)),
-      current_delay_(20.0), oscc_controller_(nullptr), oscc_enabled_(false),
-      mu_learner_(nullptr), learner_enabled_(false) {
+      current_delay_(20.0), mu_learner_(nullptr), learner_enabled_(false) {
     std::cout << "=== RLStateManager Constructor ===" << std::endl;
     std::cout << "Default values:" << std::endl;
     std::cout << "  current_mu: " << current_mu_ << std::endl;
@@ -263,16 +258,6 @@ void RLStateManager::FinalizeCurrentRtGroup() {
                       << ", avg_reward=" << current_rt_group_.avg_reward
                       << ", " << mu_learner_->GetStatusString() << std::endl;
         }
-        // OSCC回退
-        else if (oscc_enabled_ && oscc_controller_) {
-            oscc_controller_->OnRtGroupComplete(
-                current_rt_group_.frame_id,
-                current_rt_group_.Rt_value,
-                current_rt_group_.loss_rate
-            );
-            current_mu_ = oscc_controller_->GetCurrentMu();
-            NS_LOG_DEBUG("OSCC: Updated mu to " << current_mu_ << " after Rt group complete");
-        }
     }
     
     // 重置当前Rt组
@@ -472,35 +457,6 @@ void RLStateManager::UpdateNetworkState(double delay_ms, double loss_rate, Time 
 void RLStateManager::SetCurrentLossRate(double loss_rate) {
     current_loss_rate_ = loss_rate;
     NS_LOG_INFO("RLStateManager current_loss_rate updated to: " << current_loss_rate_);
-}
-
-void RLStateManager::SetOSCCController(OSCCController* controller) {
-    oscc_controller_ = controller;
-    oscc_enabled_ = (controller != nullptr);
-    NS_LOG_INFO("RLStateManager: OSCCController " << (oscc_enabled_ ? "enabled" : "disabled"));
-    if (oscc_enabled_) {
-        std::cout << "[RLStateManager] OSCC enabled, will use dynamic mu from OSCCController" << std::endl;
-    }
-}
-
-bool RLStateManager::IsOSCCEnabled() const {
-    return oscc_enabled_ && oscc_controller_ != nullptr;
-}
-
-double RLStateManager::GetAdaptiveMu(uint32_t frame_id, uint32_t Rt) {
-    if (oscc_enabled_ && oscc_controller_) {
-        double oscc_mu = oscc_controller_->GetMuForPacket(frame_id, Rt);
-        current_mu_ = oscc_mu;
-        return oscc_mu;
-    }
-    return current_mu_;
-}
-
-void RLStateManager::NotifyRtGroupComplete(uint32_t frame_id, uint32_t Rt, double loss) {
-    if (oscc_enabled_ && oscc_controller_) {
-        oscc_controller_->OnRtGroupComplete(frame_id, Rt, loss);
-        current_mu_ = oscc_controller_->GetCurrentMu();
-    }
 }
 
 void RLStateManager::SetMuLearner(IMuLearner* learner) {

@@ -12,7 +12,6 @@
 #include "common_types.h"
 #include "qoe_manager.h"
 #include "rl_state_manager.h"
-#include "oscc_controller.h"
 #include "network_components.h"
 #include "ns3/webrtc-defines.h"
 #include "ns3/ex-webrtc-module.h"
@@ -63,7 +62,6 @@ public:
     void SetQoEManager(QoEIntegrationManager* qoe_manager);
     void SetRLStateManager(RLStateManager* rl_manager);
     void SetBandwidthScaleFactor(double factor);
-    void SetOSCCController(OSCCController* controller);
     
     // 获取μ值
     double GetMuAtTimestamp(double timestamp_s) const;
@@ -80,7 +78,6 @@ private:
     TraceScaledBandwidth m_traceScaledBw;
     GetTraceBandwidthCallback m_getTraceBw;
     BandwidthChanger* m_changer;
-    OSCCController* oscc_controller_;
     
     double current_mu;
     double current_loss_rate;

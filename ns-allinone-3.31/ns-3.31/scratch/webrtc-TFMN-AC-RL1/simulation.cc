@@ -215,10 +215,9 @@ void test_app_on_p2p(const std::string& instance, TimeConollerType controller_ty
                      float startapptime, float endapptime, double max_bandwith,
                      TriggerRandomLoss* trigger_loss, BandwidthChanger* changer, 
                      const std::string& trace_filename, double bandwidth_scale_factor,
-                     double loss_rate, bool oscc_mode, uint32_t fps,
+                     double loss_rate, uint32_t fps,
                      const std::string& frame_trace_output, bool skip_frame_enabled,
-                     const std::string& base_output_folder, bool learner_mode,
-                     const std::string& learner_type) {
+                     const std::string& base_output_folder) {
     std::cout << "\n=== test_app_on_p2p started with Real Video Frame Analysis ===" << std::endl;
     std::cout << "Instance: " << instance << std::endl;
     std::cout << "Normalized application time: " << startapptime << "s to " << endapptime << "s" << std::endl;
@@ -323,8 +322,7 @@ void test_app_on_p2p(const std::string& instance, TimeConollerType controller_ty
     std::vector<std::unique_ptr<QoEIntegrationManager>> qoe_managers;
     std::vector<std::unique_ptr<FramePlayoutManager>> frame_playout_managers;
     std::vector<std::unique_ptr<RLStateManager>> rl_managers;
-    std::vector<std::unique_ptr<OSCCController>> oscc_controllers;
-    std::vector<std::unique_ptr<IMuLearner>> mu_learners;
+    std::vector<std::unique_ptr<GymMuLearner>> gym_learners;
     
     // 初始化 FramePlayoutManager
     for (int i = 0; i < num; i++) {
@@ -348,56 +346,23 @@ void test_app_on_p2p(const std::string& instance, TimeConollerType controller_ty
         rl_managers.push_back(std::move(rl));
     }
     
-    // 初始化 OSCCController
+    // 初始化 GymMuLearner (ns3-gym based)
+    std::cout << "\n=== Initializing GymMuLearners (Python-based via ns3-gym) ===" << std::endl;
     for (int i = 0; i < num; i++) {
-        auto oscc = std::make_unique<OSCCController>();
-        oscc->SetParameters(0.02, 0.5, 1.5, bandwidth_scale_factor);
-        oscc->SetEnabled(oscc_mode && !learner_mode);
-        if (oscc_mode && !learner_mode) {
-            rl_managers[i]->SetOSCCController(oscc.get());
-        }
-        oscc_controllers.push_back(std::move(oscc));
+        MuLearnerConfig config;
+        config.mu_min = 0.5;
+        config.mu_max = 1.5;
+        config.rt_max = 20.0;
+        config.loss_max = 0.1;
+        config.baseline_decay = 0.95;
+        
+        auto learner = std::make_unique<GymMuLearner>(config);
+        rl_managers[i]->SetMuLearner(learner.get());
+        gym_learners.push_back(std::move(learner));
+        
+        std::cout << "GymMuLearner " << i << " initialized (awaiting Python agent connection)" << std::endl;
     }
-    
-    // 初始化 MuLearner
-    if (learner_mode) {
-        std::cout << "\n=== Initializing MuLearners (type: " << learner_type << ") ===" << std::endl;
-        for (int i = 0; i < num; i++) {
-            MuLearnerConfig config;
-            config.mu_min = 0.5;
-            config.mu_max = 1.5;
-            config.learning_rate = 0.01;
-            config.exploration_sigma = 0.05;
-            config.baseline_decay = 0.95;
-            config.grad_clip = 1.0;
-            config.rt_max = 20.0;
-            config.loss_max = 0.1;
-            config.initial_theta = {0.0, 0.0, 0.0};  // 用于 warm-start
-            
-            std::unique_ptr<IMuLearner> learner;
-            
-            if (learner_type == "mlp" || learner_type == "torch") {
-#ifdef OSCC_USE_TORCH
-                learner = std::make_unique<TorchMLPMuLearner>(config);
-                std::cout << "MuLearner " << i << " created as TorchMLPMuLearner (2->16->8->1)" << std::endl;
-#else
-                std::cerr << "ERROR: TorchMLPMuLearner requested but OSCC_USE_TORCH not defined!" << std::endl;
-                std::cerr << "Falling back to BanditMuLearner..." << std::endl;
-                learner = std::make_unique<BanditMuLearner>(config);
-#endif
-            } else {
-                // 默认使用 BanditMuLearner
-                learner = std::make_unique<BanditMuLearner>(config);
-                std::cout << "MuLearner " << i << " created as BanditMuLearner (bandit policy gradient)" << std::endl;
-            }
-            
-            rl_managers[i]->SetMuLearner(learner.get());
-            mu_learners.push_back(std::move(learner));
-            
-            std::cout << "MuLearner " << i << " initialized and connected to RLStateManager" << std::endl;
-        }
-        std::cout << "================================\n" << std::endl;
-    }
+    std::cout << "================================\n" << std::endl;
     
     // 初始化 QoEIntegrationManager
     for (int i = 0; i < num; i++) {
@@ -405,11 +370,9 @@ void test_app_on_p2p(const std::string& instance, TimeConollerType controller_ty
         qoe->SetRLStateManager(rl_managers[i].get());
         qoe->SetBandwidthChanger(changer);
         
-        if (learner_mode && i < static_cast<int>(mu_learners.size())) {
-            qoe->SetMuLearner(mu_learners[i].get(), true);
-        }
-        if (i < static_cast<int>(oscc_controllers.size()) && oscc_controllers[i]) {
-            qoe->SetOSCCController(oscc_controllers[i].get());
+        // 设置 Gym learner
+        if (i < static_cast<int>(gym_learners.size())) {
+            qoe->SetMuLearner(gym_learners[i].get(), true);
         }
         qoe_managers.push_back(std::move(qoe));
     }
@@ -420,10 +383,6 @@ void test_app_on_p2p(const std::string& instance, TimeConollerType controller_ty
         trace_vec.push_back(trace);
         
         trace->SetCurrentParameters(bandwidth_scale_factor, loss_rate);
-        
-        if (i < static_cast<int>(oscc_controllers.size()) && oscc_controllers[i]) {
-            trace->SetOSCCController(oscc_controllers[i].get());
-        }
         
         trace->Log(log, WebrtcTrace::E_WEBRTC_BW | WebrtcTrace::E_WEBRTC_LOSS | WebrtcTrace::E_WEBRTC_OWD);
         
@@ -477,19 +436,11 @@ void test_app_on_p2p(const std::string& instance, TimeConollerType controller_ty
         rl_managers[i]->OutputStateRecords(base_output_folder + "/" + prefix + std::to_string(i + 1), bandwidth_scale_factor, loss_rate);
         rl_managers[i]->OutputRtGroupRewards(base_output_folder + "/" + prefix + std::to_string(i + 1), bandwidth_scale_factor, loss_rate);
         
-        if (learner_mode && i < static_cast<int>(mu_learners.size()) && mu_learners[i]) {
+        // Gym learner 输出
+        if (i < static_cast<int>(gym_learners.size()) && gym_learners[i]) {
             rl_managers[i]->OutputLearnerLog(base_output_folder + "/" + prefix + std::to_string(i + 1), bandwidth_scale_factor, loss_rate);
-            std::cout << "[Simulation] Final learner status for instance " << i << ": " 
-                      << mu_learners[i]->GetStatusString() << std::endl;
-        }
-        
-        if (oscc_mode && !learner_mode && i < static_cast<int>(oscc_controllers.size()) && oscc_controllers[i]) {
-            std::string mu_trace_file = base_output_folder + "/" + prefix + std::to_string(i + 1) + "_OSCC_mu_trace.csv";
-            oscc_controllers[i]->OutputMuTrace(mu_trace_file);
-        }
-        if (i < static_cast<int>(oscc_controllers.size()) && oscc_controllers[i]) {
-            std::string qoe_file = base_output_folder + "/" + prefix + std::to_string(i + 1) + "_OSCC_qoe.csv";
-            oscc_controllers[i]->OutputFrameQoE(qoe_file);
+            std::cout << "[Simulation] Final Gym learner status for instance " << i << ": " 
+                      << gym_learners[i]->GetStatusString() << std::endl;
         }
     }
     
@@ -531,24 +482,16 @@ void test_app_on_p2p(const std::string& instance, TimeConollerType controller_ty
 void run_single_trace_simulation(const std::string& trace_file, const std::string& instance, 
                                  TimeConollerType controller_type, int num, double max_bandwith,
                                  double loss_rate, const std::string& base_output_folder,
-                                 double bandwidth_scale_factor, bool oscc_mode,
+                                 double bandwidth_scale_factor,
                                  uint32_t fps, const std::string& frame_trace_output,
-                                 bool skip_frame_enabled, bool learner_mode,
-                                 const std::string& learner_type) {
+                                 bool skip_frame_enabled) {
     std::cout << "\n==========================================" << std::endl;
     std::cout << "Starting simulation for: " << trace_file << std::endl;
     std::cout << "Instance: " << instance << std::endl;
     std::cout << "Max bandwidth: " << max_bandwith << " Mbps" << std::endl;
     std::cout << "Loss rate: " << loss_rate << " (THIS SHOULD BE 0.01, 0.02, etc.)" << std::endl;
-    std::cout << "OSCC mode: " << (oscc_mode ? "ENABLED (dynamic μ adjustment)" : "disabled") << std::endl;
-    std::cout << "Learner mode: " << (learner_mode ? "ENABLED (lightweight RL)" : "disabled") << std::endl;
-    if (learner_mode) {
-        std::cout << "Initial bandwidth scale factor μ: " << bandwidth_scale_factor << " (will be learned online)" << std::endl;
-    } else if (oscc_mode) {
-        std::cout << "Initial bandwidth scale factor μ: " << bandwidth_scale_factor << " (will be dynamically adjusted)" << std::endl;
-    } else {
-        std::cout << "Bandwidth scale factor μ: " << bandwidth_scale_factor << std::endl;
-    }
+    std::cout << "Gym Learner mode: ENABLED (Python-based RL via ns3-gym)" << std::endl;
+    std::cout << "Initial bandwidth scale factor μ: " << bandwidth_scale_factor << " (will be learned by Python agent)" << std::endl;
     std::cout << "FPS: " << fps << std::endl;
     std::cout << "Skip frame: " << (skip_frame_enabled ? "ENABLED" : "DISABLED") << std::endl;
     std::cout << "Frame trace output: " << (frame_trace_output.empty() ? "auto-generated" : frame_trace_output) << std::endl;
@@ -624,9 +567,9 @@ void run_single_trace_simulation(const std::string& trace_file, const std::strin
     
     test_app_on_p2p(instance, controller_type, num, startapptime, endapptime, 
                    max_bandwith, triggerloss.get(), changer.get(), trace_file, 
-                   bandwidth_scale_factor, loss_rate, oscc_mode,
+                   bandwidth_scale_factor, loss_rate,
                    fps, frame_trace_output, skip_frame_enabled,
-                   base_output_folder, learner_mode, learner_type);
+                   base_output_folder);
     
     std::cout << "Simulation completed successfully" << std::endl;
     
