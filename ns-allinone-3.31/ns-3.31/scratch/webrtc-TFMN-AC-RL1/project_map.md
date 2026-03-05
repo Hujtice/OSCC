@@ -313,7 +313,7 @@ pip3 install -r scratch/webrtc-TFMN-AC-RL1/gym_agent/requirements.txt
 # 终端1 - ns-3 仿真（先启动，等待 Python 通过共享内存连接）
 cd /home/hjt/OSCC/ns-allinone-3.31/ns-3.31
 ./waf --run "scratch/webrtc-TFMN-AC-RL1/webrtc-TFMN-AC-RL1 \
-  --trace=traces/traces/AItrans/AItrans_1.log \
+  --trace=traces/traces/AItrans/AItrans_6.log \
   --skip=true --mu=1.0 --ls=0.01 \
   --folder=trace_results/ai_training --it=ai_test"
 
@@ -321,7 +321,12 @@ cd /home/hjt/OSCC/ns-allinone-3.31/ns-3.31
 # 注意：必须用 python3.12，因为 python3 是 3.8（给 waf 用），ML 包装在 3.12 下
 cd scratch/webrtc-TFMN-AC-RL1/gym_agent
 python3.12 train.py --algorithm PPO --timesteps 100000
+
+# 断点接训
+python3.12 train.py --algorithm PPO --timesteps 100000   --load-model ./models/PPO_webrtc_mu_20260227_141733_20000_steps.zip
 ```
+
+
 
 ## Trace 文件格式
 

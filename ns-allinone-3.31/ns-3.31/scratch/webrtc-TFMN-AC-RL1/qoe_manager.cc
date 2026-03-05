@@ -1,6 +1,7 @@
 #include "qoe_manager.h"
 #include "ns3/log.h"
 #include "ns3/simulator.h"
+#include <fstream>
 
 namespace oscc {
 
@@ -68,7 +69,9 @@ void QoEIntegrationManager::OnPacketReceived(const FramePacketInfo& info, const 
                                                                 info.packet_size, trace_bw);
     
     double mu = rl_manager_->GetCurrentMu();
-    
+    double old_mu = mu;
+    bool mu_changed = false;
+
     // 使用MuLearner (Gym-based)
     if (use_learner_ && mu_learner_) {
         MuState state(static_cast<double>(Rt), trace_loss);
@@ -77,6 +80,7 @@ void QoEIntegrationManager::OnPacketReceived(const FramePacketInfo& info, const 
         
         if (std::abs(learner_mu - mu) > 0.001) {
             mu = learner_mu;
+            mu_changed = true;
             rl_manager_->SetMu(mu);
             if (webrtc_sender_) webrtc_sender_->UpdateMuDynamic(mu);
             
@@ -96,16 +100,49 @@ void QoEIntegrationManager::OnPacketReceived(const FramePacketInfo& info, const 
                                                 miss_deadline_time, Rt, rl_manager_->GetLastPacketRt(), 
                                                 info.frame_id, packet_idx);
     
-    double bw_util = (gcc_bw * mu) / trace_bw;
+    double bw_util;
+    if ((gcc_bw * mu) > trace_bw) {
+        bw_util = 1.0;
+    } else {
+        bw_util = (gcc_bw * mu) / trace_bw;
+    }
     
     rl_manager_->RecordPacketState(info.frame_id, packet_idx, mu, Rt, trace_loss, reward, 
                                    send_time, now, frame_stats.playout_deadline, 
                                    bw_util, 0, 0, 0, delay_ms);
+
+    // Mu trace: record when mu actually changed (for _mu_trace.csv)
+    if (mu_changed) {
+        mu_change_records_.push_back(
+            MuChangeRecord(now, info.frame_id, Rt, old_mu, mu, trace_loss, reward));
+    }
+
+    // Per-frame accumulation for _frame_qoe.csv
+    FrameAccumulator& acc = frame_accumulator_[info.frame_id];
+    acc.sum_bw_util += bw_util;
+    acc.sum_delay += delay_ms;
+    acc.sum_reward += reward;
+    acc.sum_mu += mu;
+    acc.sum_loss += trace_loss;
+    acc.count++;
 }
 
 void QoEIntegrationManager::OnFrameComplete(const FrameStatistics& stats) {
-    // Frame completion handling if needed in future
-    // Currently only used for logging/statistics
+    auto it = frame_accumulator_.find(stats.frame_id);
+    if (it == frame_accumulator_.end() || it->second.count == 0) {
+        return;
+    }
+    FrameAccumulator& acc = it->second;
+    FrameQoESummary summary;
+    summary.frame_id = stats.frame_id;
+    summary.bandwidth_utilization = acc.sum_bw_util / acc.count;
+    summary.loss_rate = acc.sum_loss / acc.count;
+    summary.delay_avg = acc.sum_delay / acc.count;
+    summary.mu = acc.sum_mu / acc.count;
+    summary.reward_avg = acc.sum_reward / acc.count;
+    summary.timestamp = Simulator::Now();
+    frame_qoe_map_[stats.frame_id] = summary;
+    frame_accumulator_.erase(it);
 }
 
 void QoEIntegrationManager::OnPacketLost(uint32_t seq_num) {
@@ -186,6 +223,47 @@ void QoEIntegrationManager::OutputBandwidthHistory(const std::string& filename) 
     
     file.close();
     NS_LOG_INFO("Bandwidth history saved to: " << filename);
+}
+
+void QoEIntegrationManager::OutputMuTrace(const std::string& filename) const {
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+        NS_LOG_ERROR("Cannot open mu trace file: " << filename);
+        return;
+    }
+    file << "timestamp,frame_id,Rt,old_mu,new_mu,loss_rate,reward" << std::endl;
+    for (const auto& record : mu_change_records_) {
+        file << record.timestamp.GetSeconds() << ","
+             << record.frame_id << ","
+             << record.Rt_value << ","
+             << record.old_mu << ","
+             << record.new_mu << ","
+             << record.loss_rate << ","
+             << record.reward << std::endl;
+    }
+    file.close();
+    NS_LOG_INFO("Mu trace saved to: " << filename << " with " << mu_change_records_.size() << " records");
+}
+
+void QoEIntegrationManager::OutputFrameQoE(const std::string& filename) const {
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+        NS_LOG_ERROR("Cannot open frame QoE file: " << filename);
+        return;
+    }
+    file << "frame_id,bandwidth_utilization,loss_rate,delay_avg,mu,reward_avg,timestamp_s" << std::endl;
+    for (const auto& pair : frame_qoe_map_) {
+        const FrameQoESummary& s = pair.second;
+        file << s.frame_id << ","
+             << s.bandwidth_utilization << ","
+             << s.loss_rate << ","
+             << s.delay_avg << ","
+             << s.mu << ","
+             << s.reward_avg << ","
+             << s.timestamp.GetSeconds() << std::endl;
+    }
+    file.close();
+    NS_LOG_INFO("Frame QoE saved to: " << filename);
 }
 
 } // namespace oscc

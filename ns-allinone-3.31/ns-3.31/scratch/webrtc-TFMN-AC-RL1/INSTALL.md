@@ -97,7 +97,7 @@ cd /path/to/ns-3.31
 ./waf --run "scratch/webrtc-TFMN-AC-RL1/webrtc-TFMN-AC-RL1 \
   --trace=traces/traces/AItrans/AItrans_1.log \
   --skip=true --mu=1.0 --ls=0.01 \
-  --folder=trace_results/ai_test --it=ai1"
+  --folder=trace_results/Altrans_case1 --it=/Altrans_case1"
 ```
 
 **终端 2**（在终端 1 启动后）：
@@ -106,6 +106,10 @@ cd /path/to/ns-3.31
 cd /path/to/ns-3.31/scratch/webrtc-TFMN-AC-RL1/gym_agent
 python3.12 train.py --algorithm PPO --timesteps 10000
 ```
+
+断电续训的话，代码格式大致是这样
+python3.12 train.py --algorithm PPO --timesteps 100000   --load-model ./models/PPO_webrtc_mu_20260227_143451_final.zip
+
 
 **预期**：两端正常交换数据，Python 端有 step 与 reward 输出。
 
@@ -129,15 +133,14 @@ sudo apt install build-essential
 
 **解决**：py_interface 依赖 C 扩展 shm_pool，必须从 `src/ns3-ai/py_interface` 完整安装（`pip3 install --user .`），不能只复制 py_interface.py。
 
-### 问题 4：仿真结束后 Python 不退出 / 共享内存残留
+### 问题 4：仿真结束后 Python 不退出 / 共享内存残留 / Python 报 "simulation ended before first obs"
 
-**解决**：仿真结束前会调用 `NotifySimulationEnd()`。若异常退出，可手动清理共享内存：
+**解决**：仿真结束前会调用 `NotifySimulationEnd()`。若异常退出或行为异常（例如 Python 报 "ns3-ai finished before first obs"），可先手动清理共享内存再重试：
 
 ```bash
-# 使用 ns3-ai 提供的脚本（若存在）
-/path/to/ns-3.31/src/ns3-ai/freeshm.sh
-# 或
-ipcrm -M 0x4d2   # 1234 的十六进制，即默认 shm key
+ipcrm -M 1234 2>/dev/null   # 删除 key=1234 的共享内存段（默认 SHM_KEY）
+# 或使用 ns3-ai 提供的脚本（若存在）
+# /path/to/ns-3.31/src/ns3-ai/freeshm.sh
 ```
 
 ### 问题 5：多流（num>1）时 Python 只连一个

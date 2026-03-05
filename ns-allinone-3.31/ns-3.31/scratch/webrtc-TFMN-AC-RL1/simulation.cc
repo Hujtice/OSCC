@@ -441,6 +441,8 @@ void test_app_on_p2p(const std::string& instance, TimeConollerType controller_ty
         // Ai learner 输出
         if (i < static_cast<int>(ai_learners.size()) && ai_learners[i]) {
             rl_managers[i]->OutputLearnerLog(base_output_folder + "/" + prefix + std::to_string(i + 1), bandwidth_scale_factor, loss_rate);
+            qoe_managers[i]->OutputMuTrace(base_output_folder + "/" + prefix + std::to_string(i + 1) + "_mu_trace.csv");
+            qoe_managers[i]->OutputFrameQoE(base_output_folder + "/" + prefix + std::to_string(i + 1) + "_frame_qoe.csv");
             std::cout << "[Simulation] Final Ai learner status for instance " << i << ": " 
                       << ai_learners[i]->GetStatusString() << std::endl;
         }
