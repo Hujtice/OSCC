@@ -65,6 +65,11 @@ void FrameAwareWebrtcTrace::OnReceiptPktInfo(uint32_t now, uint32_t seq, uint32_
         NS_LOG_DEBUG("Updated current delay in RL manager: " << current_delay_ms << "ms, RTT=" 
                    << trace_rtt_ms << "ms, loss=" << trace_loss_rate);
     }
+
+    // 将 seq 喂入 QoE 管理器的丢包追踪器（P1：实际观测丢包）
+    if (qoe_manager_) {
+        qoe_manager_->ReportPacketSeq(seq);
+    }
 }
 
 void FrameAwareWebrtcTrace::Log(const std::string& name, uint32_t flags) {

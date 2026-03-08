@@ -45,11 +45,18 @@ struct PacketStateRecord {
     double p_loss_value;
     double p_mddl_value;
     double current_delay;
-    
-    PacketStateRecord() : frame_id(0), packet_index(0), mu_used(1.0), 
+    // 真实吞吐量与 bw_util 溯源字段（用于 CSV 统计与溯源）
+    double real_throughput_bps;
+    double gcc_bw_bps;
+    double trace_bw_bps;
+    double scaled_bw_bps;
+
+    PacketStateRecord() : frame_id(0), packet_index(0), mu_used(1.0),
                          Rt(0), loss_rate(0.0), reward(0.0),
                          bandwidth_utilization(0.0), p_delay_value(0.0),
-                         p_loss_value(0.0), p_mddl_value(0.0), current_delay(0.0) {}
+                         p_loss_value(0.0), p_mddl_value(0.0), current_delay(0.0),
+                         real_throughput_bps(0.0), gcc_bw_bps(0.0),
+                         trace_bw_bps(0.0), scaled_bw_bps(0.0) {}
 };
 
 // ============================================================================
@@ -130,7 +137,7 @@ struct MuExperience {
 struct MuLearnerConfig {
     double mu_min = 0.5;
     double mu_max = 1.5;
-    double rt_max = 20.0;
+    double rt_max = 5.0; //20.0;
     double loss_max = 0.1;
     double learning_rate = 0.01;
     double baseline_decay = 0.95;

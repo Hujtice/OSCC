@@ -85,7 +85,7 @@ class Ns3AiGymEnv(gym.Env):
         calculates the reward, and writes it together with the next observation.
         """
         # action is [mu] from SB3; clip to [0.5, 1.5]
-        mu = float(np.clip(action[0], 0.5, 1.5))
+        mu = float(np.clip(action[0], 0.8, 1.2))
         # Acquire: get obs/reward/done that C++ wrote (after our previous action); then write our action
         with self._rl as data:
             if data is None:

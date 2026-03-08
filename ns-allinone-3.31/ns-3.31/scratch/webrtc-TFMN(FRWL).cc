@@ -113,17 +113,30 @@ struct TraceData {
 };
 
 // ============================================================================
+// 前向声明
+// ============================================================================
+class RLStateManager;
+
+// ============================================================================
 // OSCCController 类 - OSCC算法核心控制器
 // 实现基于Rt的精细化历史查表机制进行动态μ调整
 // ============================================================================
 class OSCCController {
 public:
     // 历史状态记录结构 (用于 HistoryMap)
+    // 新设计：每个 Rt 区域下维护多个丢包率区间 l_m,i=[loss_min,loss_max)，
+    // 每个区间关联一个激进因子 μ_m,i，形成 (Rt_i, l_m,i, μ_m,i) 的元组集合。
+    struct LossBin {
+        double loss_min;  // 区间下界 x
+        double loss_max;  // 区间上界 y
+        double mu;        // 该区间对应的 μ_m,i
+
+        LossBin(double lmin = 0.0, double lmax = 0.01, double m = 1.0)
+            : loss_min(lmin), loss_max(lmax), mu(m) {}
+    };
+
     struct RtHistoryEntry {
-        double mu;
-        double recorded_loss;
-        
-        RtHistoryEntry(double m = 1.0, double l = 0.01) : mu(m), recorded_loss(l) {}
+        std::vector<LossBin> bins;  // 某个 Rt_i 下的所有 (l_m,i, μ_m,i)
     };
     
     // μ变化记录结构 (用于日志输出)
@@ -174,12 +187,53 @@ public:
     OSCCController() 
         : epsilon_(0.02), mu_min_(0.5), mu_max_(1.5),
           current_frame_id_(0), oscc_enabled_(true), total_adjustments_(0) {
+        // 初始化全局 HistoryMap：
+        // Rt_i 从 0 到 10；每个 Rt_i 下维护 M=6 个连续丢包率区间：
+        //   l_0,i=[0,0.01), l_1,i=[0.01,0.02), ... , l_5,i=[0.05,0.06)
+        // 对应 μ 的初始化规则：
+        // - 对于 Rt=0：μ_m,0 = 1.0 - 0.01 * m, m=0..5 （1.0,0.99,...）
+        // - 对于 Rt=1..10：
+        //     μ_0,i = 1.0 + 0.05 * Rt_i
+        //     μ_m,i = μ_0,i - 0.01 * Rt_i, m!=0
+        //
+        // 注意：这里实现的是论文中给出的初始化思想，作为运行基线。
+        for (uint32_t rt = 0; rt <= 10; ++rt) {
+            RtHistoryEntry entry;
+            for (uint32_t m = 0; m <= 5; ++m) {
+                double loss_min = 0.01 * static_cast<double>(m);
+                double loss_max = 0.01 * static_cast<double>(m + 1);
+                double mu = 1.0;
+
+                if (rt == 0) {
+                    // Rt=0: μ_m,0 = 1.0 - 0.01 * m
+                    mu = 1.0 - 0.01 * static_cast<double>(m);
+                } else {
+                    // Rt>=1: μ_0,i = 1.0 + 0.05 * Rt
+                    //        μ_m,i = μ_0,i - 0.01 * Rt, m!=0
+                    double mu0 = 1.0 + 0.05 * static_cast<double>(rt);
+                    if (m == 0) {
+                        mu = mu0;
+                    } else {
+                        mu = mu0 - 0.01 * static_cast<double>(rt);
+                    }
+                }
+
+                // 夹紧到全局 μ 范围
+                if (mu < mu_min_) mu = mu_min_;
+                if (mu > mu_max_) mu = mu_max_;
+
+                entry.bins.emplace_back(loss_min, loss_max, mu);
+            }
+            history_map_[rt] = entry;
+        }
+
         NS_LOG_INFO("OSCCController initialized: epsilon=" << epsilon_ 
                    << ", mu_range=[" << mu_min_ << ", " << mu_max_ << "]");
-        std::cout << "=== OSCCController Initialized (Rt-based Lookup) ===" << std::endl;
+        std::cout << "=== OSCCController Initialized (Global HistoryMap with Rt×loss bins) ===" << std::endl;
         std::cout << "  epsilon: " << epsilon_ << std::endl;
         std::cout << "  mu_range: [" << mu_min_ << ", " << mu_max_ << "]" << std::endl;
         std::cout << "  loss_window_size: " << LOSS_WINDOW_SIZE << std::endl;
+        std::cout << "  Global HistoryMap initialized with Rt=0~10, each Rt has 6 loss bins [0,0.06)" << std::endl;
         std::cout << "=================================================" << std::endl;
     }
     
@@ -262,6 +316,13 @@ public:
         
         // 应用新mu到发送端
         ApplyMuToSender(new_mu);
+
+        // 调试输出：记录每次通过 OSCC 计算出的 μ
+        std::cout << "[OSCC][GetMuForPacket] t=" << Simulator::Now().GetSeconds()
+                  << "s, frame_id=" << frame_id
+                  << ", Rt=" << Rt
+                  << ", L_curr=" << L_curr
+                  << ", mu=" << new_mu << std::endl;
         
         NS_LOG_DEBUG("OSCC: GetMuForPacket frame=" << frame_id << ", Rt=" << Rt 
                     << ", L_curr=" << L_curr << ", new_mu=" << new_mu);
@@ -280,15 +341,19 @@ public:
                    << ", loss=" << group_loss);
     }
     
-    // 帧完成时调用 - 仅记录统计信息
+    // 帧完成时调用 - 更新全局 HistoryMap 并记录统计信息
     void OnFrameComplete(uint32_t frame_id, double frame_qoe,
                       double bandwidth_utilization, double loss_rate,
                       double delay_metric, double delay_avg, double ddl_miss_rate,
                       double qoe_recv, double qoe_delay,
-                      double qoe_loss, double qoe_ddl) {
+                      double qoe_loss, double qoe_ddl,
+                      RLStateManager* rl_manager = nullptr) {
         if (!oscc_enabled_) {
             return;
         }
+        
+        // 更新全局 HistoryMap：将当前帧的 Rt-loss-mu 信息更新到 HistoryMap
+        UpdateHistoryMapFromCurrentFrame(frame_id, rl_manager);
         
         // 保存当前帧QoE详细信息（仅用于统计，不影响mu调整）
         FrameQoEDetail detail;
@@ -315,7 +380,15 @@ public:
     // 获取当前μ（返回最近使用的mu，用于日志/统计）
     double GetCurrentMu() const {
         if (current_frame_cache_.empty()) {
-            return history_map_.empty() ? 1.0 : history_map_.begin()->second.mu;
+            if (history_map_.empty()) {
+                return 1.0;
+            }
+            // 取第一个 Rt 下第一个 loss bin 的 μ 作为代表
+            const auto& first_entry = history_map_.begin()->second;
+            if (!first_entry.bins.empty()) {
+                return first_entry.bins.front().mu;
+            }
+            return 1.0;
         }
         return current_frame_cache_.begin()->second;
     }
@@ -446,55 +519,114 @@ private:
             NS_LOG_DEBUG("OSCC: HistoryMap empty, using default mu=1.0");
             return 1.0;  // 初始默认值
         }
-        
-        auto it = history_map_.find(Rt);
-        
-        // 情况 1: 精确命中
-        if (it != history_map_.end()) {
-            double new_mu = AdjustMuByLoss(it->second.mu, it->second.recorded_loss, L_curr);
-            NS_LOG_DEBUG("OSCC: Exact match for Rt=" << Rt 
-                        << ", L_prev=" << it->second.recorded_loss 
-                        << ", L_curr=" << L_curr << ", mu: " << it->second.mu << " -> " << new_mu);
-            return new_mu;
-            // return 1.0;
-        }
-        
+
         // 获取历史 Rt 范围
         uint32_t min_rt = history_map_.begin()->first;
         uint32_t max_rt = history_map_.rbegin()->first;
-        
-        // 情况 2: 大于最大值 (激进策略)
+
+        // 情况 A：Rt 在已有 HistoryMap 中，使用 (Rt, L_curr) 在 loss 区间内查表
+        auto it = history_map_.find(Rt);
+        if (it != history_map_.end()) {
+            const RtHistoryEntry& entry = it->second;
+            if (!entry.bins.empty()) {
+                // 1) 查找 L_curr 所在的 loss 区间 l_m,i
+                const OSCCController::LossBin* matched_bin = nullptr;
+                for (const auto& bin : entry.bins) {
+                    if (L_curr >= bin.loss_min && L_curr < bin.loss_max) {
+                        matched_bin = &bin;
+                        break;
+                    }
+                }
+
+                if (matched_bin) {
+                    // 命中某个 l_m,i，直接返回对应 μ_m,i
+                    NS_LOG_DEBUG("OSCC: Exact Rt & loss-bin match, Rt=" << Rt
+                                 << ", L_curr=" << L_curr
+                                 << ", l=[" << matched_bin->loss_min << "," << matched_bin->loss_max
+                                 << "), mu=" << matched_bin->mu);
+                    return ClipMu(matched_bin->mu);
+                } else {
+                    // 未命中任何 loss 区间，执行基于损耗的 ε 调整
+                    const auto& first_bin = entry.bins.front();
+                    const auto& last_bin  = entry.bins.back();
+                    double base_mu = last_bin.mu;
+
+                    if (L_curr < first_bin.loss_min) {
+                        // L_curr 低于最小区间 => 情况变好，更加激进：μ_i,j = μ_m,i + ε
+                        base_mu = first_bin.mu + epsilon_;
+                        NS_LOG_DEBUG("OSCC: Rt match but L_curr below min loss-bin, Rt=" << Rt
+                                     << ", L_curr=" << L_curr
+                                     << ", use first-bin mu=" << first_bin.mu
+                                     << " + epsilon -> " << base_mu);
+                    } else if (L_curr >= last_bin.loss_max) {
+                        // L_curr 高于最大区间 => 情况变差，更保守：μ_i,j = μ_m,i - ε
+                        base_mu = last_bin.mu - epsilon_;
+                        NS_LOG_DEBUG("OSCC: Rt match but L_curr above max loss-bin, Rt=" << Rt
+                                     << ", L_curr=" << L_curr
+                                     << ", use last-bin mu=" << last_bin.mu
+                                     << " - epsilon -> " << base_mu);
+                    } else {
+                        // 落在已有区间之间的“空洞”，使用最近的下界区间 μ 再做微调
+                        // 这里简化为以最后一个区间为基准做保守调整
+                        base_mu = last_bin.mu - epsilon_;
+                        NS_LOG_DEBUG("OSCC: Rt match but L_curr in gap between bins, Rt=" << Rt
+                                     << ", L_curr=" << L_curr
+                                     << ", use last-bin mu=" << last_bin.mu
+                                     << " - epsilon -> " << base_mu);
+                    }
+
+                    return ClipMu(base_mu);
+                }
+            }
+        }
+
+        // 情况 B：Rt 超出历史最大值 => 激进外推 μ_i,j = μ_0,Rmax + ε
         if (Rt > max_rt) {
-            double mu_max_hist = history_map_.rbegin()->second.mu;
-            double new_mu = ClipMu(mu_max_hist + epsilon_);
-            NS_LOG_DEBUG("OSCC: Rt=" << Rt << " > max_rt=" << max_rt 
-                        << ", aggressive: mu " << mu_max_hist << " -> " << new_mu);
+            const RtHistoryEntry& max_entry = history_map_.rbegin()->second;
+            double mu0_rmax = 1.0;
+            if (!max_entry.bins.empty()) {
+                // 约定 bin[0] 为 μ_0,Rmax
+                mu0_rmax = max_entry.bins.front().mu;
+            }
+            double new_mu = ClipMu(mu0_rmax + epsilon_);
+            NS_LOG_DEBUG("OSCC: Rt=" << Rt << " > max_rt=" << max_rt
+                        << ", aggressive extrapolation: mu_0,Rmax=" << mu0_rmax
+                        << " -> " << new_mu);
             return new_mu;
-            // return 1.0;
         }
-        
-        // 情况 3: 小于最小值 (保守策略)
+
+        // 情况 C：Rt 低于历史最小值 => 保守策略 μ_i,j = μ_M,Rmin − ε，且不低于 mu_min_
         if (Rt < min_rt) {
-            double mu_min_hist = history_map_.begin()->second.mu;
-            double new_mu = ClipMu(mu_min_hist - epsilon_);
-            NS_LOG_DEBUG("OSCC: Rt=" << Rt << " < min_rt=" << min_rt 
-                        << ", conservative: mu " << mu_min_hist << " -> " << new_mu);
+            const RtHistoryEntry& min_entry = history_map_.begin()->second;
+            double mu_m_rmin = 1.0;
+            if (!min_entry.bins.empty()) {
+                // 约定最后一个 bin 为 μ_M,Rmin
+                mu_m_rmin = min_entry.bins.back().mu;
+            }
+            double new_mu = ClipMu(mu_m_rmin - epsilon_);
+            if (new_mu < mu_min_) new_mu = mu_min_;
+            NS_LOG_DEBUG("OSCC: Rt=" << Rt << " < min_rt=" << min_rt
+                        << ", conservative extrapolation: mu_M,Rmin=" << mu_m_rmin
+                        << " -> " << new_mu);
             return new_mu;
-            // return 1.0;
         }
-        
-        // 情况 4: 位于区间内，找 lower_bound 邻居
+
+        // 情况 D：Rt 落在历史范围内但缺少精确 Rt_i，采用邻域插值（取左侧邻居并加 ε）
         auto lower = history_map_.lower_bound(Rt);
         if (lower != history_map_.begin()) {
-            --lower;  // 找到比 Rt 小的最大邻居
-            double new_mu = AdjustMuByLoss(lower->second.mu, lower->second.recorded_loss, L_curr);
-            NS_LOG_DEBUG("OSCC: Rt=" << Rt << " in range, neighbor Rt=" << lower->first 
-                        << ", L_prev=" << lower->second.recorded_loss 
-                        << ", L_curr=" << L_curr << ", mu: " << lower->second.mu << " -> " << new_mu);
+            --lower;  // Rt_m-1 < Rt < Rt_m，使用 Rt_m-1 的 μ 再做微调
+            const RtHistoryEntry& neighbor_entry = lower->second;
+            double base_mu = 1.0;
+            if (!neighbor_entry.bins.empty()) {
+                // 邻域 μ 采用 bin[0]（μ_0,i），再 +ε
+                base_mu = neighbor_entry.bins.front().mu + epsilon_;
+            }
+            double new_mu = ClipMu(base_mu);
+            NS_LOG_DEBUG("OSCC: Rt in-range but no exact entry, neighbor Rt=" << lower->first
+                        << ", base_mu+epsilon -> " << new_mu);
             return new_mu;
-            // return 1.0;
         }
-        
+
         NS_LOG_DEBUG("OSCC: Fallback to default mu=1.0");
         return 1.0;  // 回退默认值
     }
@@ -509,22 +641,16 @@ private:
         return mu_prev;  // 相等，保持不变
     }
     
-    // 帧边界处理：用当前帧缓存替换历史表
+    // 帧边界处理：清空当前帧缓存，准备新帧（HistoryMap 不再被替换，而是全局维护）
     void OnNewFrameStart(uint32_t new_frame_id) {
-        // 用当前帧缓存替换历史表
-        if (!current_frame_cache_.empty()) {
-            history_map_.clear();
-            double L_curr = GetCurrentWindowLoss();
-            for (const auto& entry : current_frame_cache_) {
-                history_map_[entry.first] = RtHistoryEntry(entry.second, L_curr);
-            }
-            
-            NS_LOG_DEBUG("OSCC: Frame " << current_frame_id_ << " -> " << new_frame_id 
-                        << ", updated HistoryMap with " << history_map_.size() << " entries");
-            
-            std::cout << "[OSCC] New frame " << new_frame_id << " started, HistoryMap updated with " 
-                      << history_map_.size() << " Rt entries from frame " << current_frame_id_ << std::endl;
-        }
+        // 不再清空和替换 HistoryMap，只清空当前帧缓存
+        // HistoryMap 是全局维护的，会在帧完成时更新
+        
+        NS_LOG_DEBUG("OSCC: Frame " << current_frame_id_ << " -> " << new_frame_id 
+                    << ", clearing frame cache, HistoryMap remains global");
+        
+        std::cout << "[OSCC] New frame " << new_frame_id << " started, frame cache cleared" << std::endl;
+        std::cout << "[OSCC] Global HistoryMap maintained with " << history_map_.size() << " Rt entries" << std::endl;
         
         // 清空缓存，准备新帧
         current_frame_cache_.clear();
@@ -537,17 +663,28 @@ private:
         double old_mu = 1.0;
         auto hist_it = history_map_.find(Rt);
         if (hist_it != history_map_.end()) {
-            old_mu = hist_it->second.mu;
+            // 以该 Rt 下第一个 loss bin 的 μ 作为代表旧值
+            if (!hist_it->second.bins.empty()) {
+                old_mu = hist_it->second.bins.front().mu;
+            }
         } else if (!history_map_.empty()) {
             // 尝试找到邻居的mu
             auto lower = history_map_.lower_bound(Rt);
             if (lower != history_map_.begin()) {
                 --lower;
-                old_mu = lower->second.mu;
+                if (!lower->second.bins.empty()) {
+                    old_mu = lower->second.bins.front().mu;
+                }
             } else if (Rt > history_map_.rbegin()->first) {
-                old_mu = history_map_.rbegin()->second.mu;
+                const auto& last_entry = history_map_.rbegin()->second;
+                if (!last_entry.bins.empty()) {
+                    old_mu = last_entry.bins.front().mu;
+                }
             } else {
-                old_mu = history_map_.begin()->second.mu;
+                const auto& first_entry = history_map_.begin()->second;
+                if (!first_entry.bins.empty()) {
+                    old_mu = first_entry.bins.front().mu;
+                }
             }
         }
         
@@ -568,6 +705,9 @@ private:
         return std::max(mu_min_, std::min(mu_max_, mu));
     }
     
+    // 从当前帧缓存更新全局 HistoryMap（实现在 RLStateManager 类定义之后）
+    void UpdateHistoryMapFromCurrentFrame(uint32_t frame_id, RLStateManager* rl_manager);
+    
     // ============================================================================
     // 核心参数
     // ============================================================================
@@ -579,7 +719,8 @@ private:
     // 基于Rt的历史查表数据结构
     // ============================================================================
     
-    // HistoryMap: 上一帧的 {Rt -> (mu, loss)}
+    // HistoryMap: 全局的 {Rt -> [(l_m,i, μ_m,i)]}，初始包含 Rt=0~10×6 个 loss 区间，
+    // 后续会根据 CurrentMap 持续细化和扩展
     std::map<uint32_t, RtHistoryEntry> history_map_;
     
     // CurrentFrameCache: 当前帧的 {Rt -> mu}
@@ -1151,6 +1292,109 @@ private:
     OSCCController* oscc_controller_ = nullptr;
     bool oscc_enabled_ = false;
 };
+
+// OSCCController::UpdateHistoryMapFromCurrentFrame 实现（需要在 RLStateManager 定义之后）
+void OSCCController::UpdateHistoryMapFromCurrentFrame(uint32_t frame_id, RLStateManager* rl_manager) {
+    if (!rl_manager) {
+        NS_LOG_WARN("OSCC: RLStateManager is null, cannot update HistoryMap from current frame");
+        return;
+    }
+    
+    // 获取当前帧的滑动窗口丢包率
+    double L_curr = GetCurrentWindowLoss();
+    
+    // 从 RLStateManager 获取当前帧的所有 Rt 组记录
+    const auto& rt_group_records = rl_manager->GetRtGroupRecords();
+    
+    // 构建当前帧的 Rt -> (mu, loss) 映射
+    // 注意：这里的 loss 表示该帧内该 Rt 组观测到的平均丢包率 L_i,j，用于更新对应的 l_m,i
+    std::map<uint32_t, std::pair<double, double>> frame_rt_data;  // {Rt -> (mu_i,j, L_i,j)}
+    
+    // 从 current_frame_cache_ 获取 mu 值
+    for (const auto& cache_entry : current_frame_cache_) {
+        uint32_t rt = cache_entry.first;
+        double mu = cache_entry.second;
+        
+        // 从 Rt 组记录中查找对应的 loss_rate
+        double rt_loss = L_curr;  // 默认使用滑动窗口丢包率
+        for (const auto& rt_record : rt_group_records) {
+            if (rt_record.frame_id == frame_id && rt_record.Rt_value == rt) {
+                rt_loss = rt_record.loss_rate;
+                break;
+            }
+        }
+        
+        frame_rt_data[rt] = std::make_pair(mu, rt_loss);
+    }
+    
+    // 基于当前帧的 CurrentMap (Rt_i,j, L_i,j, μ_i,j) 更新 / 扩展全局 HistoryMap：
+    // - 如果 R_i,j 命中已有 Rt_i 且 L_i,j ∈ 某个 l_m,i，则用 μ_i,j 覆盖该区间的 μ_m,i
+    // - 如果 R_i,j 未命中 HistoryMap 的 Rt_i，则为该 R_i,j 新增一个决策区域，并创建对应 loss 区间
+    // - 如果 L_i,j 未命中 Rt_i 下任何现有 l_m,i，则新建一个包含 L_i,j 的 loss 区间，并绑定 μ_i,j
+    for (const auto& rt_data : frame_rt_data) {
+        uint32_t rt = rt_data.first;
+        double mu_ij = rt_data.second.first;
+        double L_ij  = rt_data.second.second;
+
+        // 如果该 Rt 尚不存在于 HistoryMap，先为其创建一个空的决策区域
+        auto hist_it = history_map_.find(rt);
+        if (hist_it == history_map_.end()) {
+            history_map_[rt] = RtHistoryEntry();
+            hist_it = history_map_.find(rt);
+        }
+
+        RtHistoryEntry& entry = hist_it->second;
+
+        // 查找 L_i,j 是否落在已有的某个 loss 区间 l_m,i 中
+        bool updated_existing_bin = false;
+        for (auto& bin : entry.bins) {
+            if (L_ij >= bin.loss_min && L_ij < bin.loss_max) {
+                // 命中区间，直接用当前帧的 μ_i,j 覆盖 μ_m,i
+                NS_LOG_INFO("OSCC: Update existing loss-bin for Rt=" << rt
+                            << ", frame=" << frame_id
+                            << ", l=[" << bin.loss_min << "," << bin.loss_max
+                            << "), mu: " << bin.mu << " -> " << mu_ij
+                            << ", L_ij=" << L_ij);
+                bin.mu = ClipMu(mu_ij);
+                updated_existing_bin = true;
+                break;
+            }
+        }
+
+        if (!updated_existing_bin) {
+            // 未命中任何现有 l_m,i，为 L_i,j 创建一个新的 loss 区间
+            // 例如：L_i,j=0.065，现有区间到 [0.05,0.06)，则新建 [0.06,0.07)
+            double lower = std::floor(L_ij * 100.0) / 100.0;
+            double upper = lower + 0.01;
+            if (upper <= lower) {
+                upper = lower + 0.01;
+            }
+
+            OSCCController::LossBin new_bin(lower, upper, ClipMu(mu_ij));
+            entry.bins.push_back(new_bin);
+
+            // 按 loss_min 排序，保持区间有序，便于后续查表
+            std::sort(entry.bins.begin(), entry.bins.end(),
+                      [](const OSCCController::LossBin& a, const OSCCController::LossBin& b) {
+                          return a.loss_min < b.loss_min;
+                      });
+
+            NS_LOG_INFO("OSCC: Added new loss-bin for Rt=" << rt
+                        << ", frame=" << frame_id
+                        << ", L_ij=" << L_ij
+                        << ", new l=[" << new_bin.loss_min << "," << new_bin.loss_max
+                        << "), mu=" << new_bin.mu);
+        }
+
+        std::cout << "[OSCC] HistoryMap updated from frame=" << frame_id
+                  << ", Rt=" << rt
+                  << ", L_ij=" << L_ij
+                  << ", mu_ij=" << mu_ij << std::endl;
+    }
+    
+    NS_LOG_INFO("OSCC: Frame " << frame_id << " complete, HistoryMap updated with " 
+                << frame_rt_data.size() << " Rt entries (Rt×loss bins)");
+}
 
 // 强化学习状态数据结构
 struct RLState {
@@ -1749,6 +1993,16 @@ public:
                 mu = oscc_mu;
                 rl_manager_->SetMu(mu);
                 if (webrtc_sender_) webrtc_sender_->UpdateMuDynamic(mu);
+
+                // 调试输出：记录每次实际下发到 WebrtcSender 的 μ 以及相关带宽信息
+                std::cout << "[QoEIntegration][OnPacketReceived] t=" << now.GetSeconds()
+                          << "s, frame_id=" << info.frame_id
+                          << ", Rt=" << Rt
+                          << ", mu=" << mu
+                          << ", gcc_bw=" << gcc_bw
+                          << ", trace_bw=" << trace_bw
+                          << ", delay_ms=" << delay_ms
+                          << std::endl;
             }
         }
         
@@ -1805,7 +2059,7 @@ public:
         
         oscc_controller_->OnFrameComplete(stats.frame_id, qoe, bandwidth_utilization, (100-qoe_loss)/100.0, 
                                           frame_delay_ms, frame_delay_ms, ddl_miss_rate, 
-                                          qoe_recv, qoe_delay, qoe_loss, qoe_ddl);
+                                          qoe_recv, qoe_delay, qoe_loss, qoe_ddl, rl_manager_);
                                           
          if (rl_manager_) {
             rl_manager_->SetMu(oscc_controller_->GetCurrentMu());
@@ -2210,15 +2464,10 @@ public:
             uint32_t timestamp = std::get<0>(scaled_entry);
             uint32_t original_bw = std::get<1>(scaled_entry);
             uint32_t scaled_bw = std::get<2>(scaled_entry);
+            // 注意：这里的 scale_factor 直接使用发送时记录下来的 μ
+            // 它已经在记录阶段从 RLStateManager（被 OSCC 更新）读取过，
+            // 不再通过 GetMuAtTimestamp 进行“回放式”覆盖，避免因缺少 mu_change_records 被错误重置为 1.0。
             double scale_factor = std::get<3>(scaled_entry);
-
-            // 如果有OSCC控制器，使用动态μ值替代发送时记录的值
-            if (oscc_controller_) {
-                double dynamic_mu = GetMuAtTimestamp(timestamp / 1000.0);  // 转换为秒
-                scale_factor = dynamic_mu;
-                // 重新计算缩放后的带宽
-                scaled_bw = static_cast<uint32_t>(original_bw * dynamic_mu);
-            }
             
             // 获取当前时刻的trace数据
             TraceData trace_data;
@@ -2710,8 +2959,9 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
     uint32_t default_frame_height = 1080;
     uint32_t default_frame_width = 1920;
     for (int i=0;i<num;i++) {
-        // std::unique_ptr<WebrtcSessionManager> m(CreateWebrtcSessionManager(time_controller,max_rate,500,max_rate,default_frame_height,default_frame_width, fps));
-        std::unique_ptr<WebrtcSessionManager> m(CreateWebrtcSessionManager(time_controller,max_rate*0.1,max_rate*0.2,max_rate,default_frame_height,default_frame_width, fps));
+        // std::unique_ptr<WebrtcSessionManager> m(CreateWebrtcSessionManager(time_controller,max_rate*0.1,max_rate*0.2,max_rate,default_frame_height,default_frame_width, fps));
+        // std::unique_ptr<WebrtcSessionManager> m(CreateWebrtcSessionManager(time_controller,max_rate*0.3,max_rate*0.3,max_rate*0.3,default_frame_height,default_frame_width, fps));
+        std::unique_ptr<WebrtcSessionManager> m(CreateWebrtcSessionManager(time_controller,3500,3500,3500,default_frame_height,default_frame_width, fps));
         // std::unique_ptr<WebrtcSessionManager> m(CreateWebrtcSessionManager(time_controller,max_rate,max_rate*0.1,max_rate*0.2,default_frame_height,default_frame_width, fps));
         sesssion_manager.push_back(std::move(m)); 
     }
@@ -3137,4 +3387,4 @@ int main(int argc, char *argv[]){
 
 // hjt@ubuntu-Precision-Tower-5810:~/OSCC/ns-allinone-3.31/ns-3.31$ ./waf --run "scratch/webrtc-TFMN(QoE) --trace=/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/AItrans_2.log --ls=0.01 --skip=true --oscc=true --folder=trace_results/AItrans_test --it=AItrans_case1" > webrtc_ns3.log 2>&1
 // hjt@ubuntu-Precision-Tower-5810:~/OSCC/ns-allinone-3.31/ns-3.31$ ./waf --run "scratch/webrtc-TFMN(GCC) --trace=/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/AItrans_2.log --ls=0.01 --skip=true --oscc=true --folder=trace_results/AItrans_test --it=AItrans_case1" > webrtc_ns3.log 2>&1
-//./waf --run "scratch/webrtc-TFMN(QoE) --trace=/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/AItrans_2.log --ls=0.01 --skip=true --oscc=true --folder=trace_results/AItrans_test --it=AItrans_case1" > webrtc_ns3.log 2>&1
+//./waf --run "scratch/webrtc-TFMN(QoEFRW) --trace=/home/hjt/OSCC/ns-allinone-3.31/ns-3.31/traces/traces/AItrans/AItrans_2.log --ls=0.01 --skip=true --oscc=true --folder=trace_results/AItrans_test --it=AItrans_case1" > webrtc_ns3.log 2>&1

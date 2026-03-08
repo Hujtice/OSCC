@@ -159,8 +159,10 @@ double RLStateManager::CalculateReward(double mu_prev, double gcc_bandwidth_bps,
 void RLStateManager::RecordPacketState(uint32_t frame_id, uint32_t packet_index, double mu_used,
                                        uint32_t Rt, double loss_rate, double reward,
                                        Time send_time, Time recivied_time, Time deadline,
-                                       double bandwidth_utilization, double p_delay, 
-                                       double p_loss, double p_mddl, double current_delay_ms) {
+                                       double bandwidth_utilization, double p_delay,
+                                       double p_loss, double p_mddl, double current_delay_ms,
+                                       double real_throughput_bps, double gcc_bw_bps,
+                                       double trace_bw_bps, double scaled_bw_bps) {
     PacketStateRecord record;
     record.frame_id = frame_id;
     record.packet_index = packet_index;
@@ -176,7 +178,11 @@ void RLStateManager::RecordPacketState(uint32_t frame_id, uint32_t packet_index,
     record.p_loss_value = p_loss;
     record.p_mddl_value = p_mddl;
     record.current_delay = current_delay_ms;
-    
+    record.real_throughput_bps = real_throughput_bps;
+    record.gcc_bw_bps = gcc_bw_bps;
+    record.trace_bw_bps = trace_bw_bps;
+    record.scaled_bw_bps = scaled_bw_bps;
+
     packet_records_.push_back(record);
     last_packet_Rt_ = Rt;
     
@@ -275,14 +281,15 @@ void RLStateManager::OutputStateRecords(const std::string& filename_prefix, doub
     }
     
     file << "frame_id,packet_index,mu_used,Rt,loss_rate,reward,send_time,recivied_time,deadline,"
-         << "bandwidth_utilization,p_delay,p_loss,p_mddl,current_delay" << std::endl;
-    
+         << "bandwidth_utilization,p_delay,p_loss,p_mddl,current_delay,"
+         << "real_throughput_bps,gcc_bw_bps,trace_bw_bps,scaled_bw_bps" << std::endl;
+
     std::vector<PacketStateRecord> sorted_records = packet_records_;
-    std::sort(sorted_records.begin(), sorted_records.end(), 
+    std::sort(sorted_records.begin(), sorted_records.end(),
              [](const PacketStateRecord& a, const PacketStateRecord& b) {
                  return a.send_time < b.send_time;
              });
-    
+
     for (const auto& record : sorted_records) {
         file << record.frame_id << ","
              << record.packet_index << ","
@@ -297,7 +304,11 @@ void RLStateManager::OutputStateRecords(const std::string& filename_prefix, doub
              << record.p_delay_value << ","
              << record.p_loss_value << ","
              << record.p_mddl_value << ","
-             << record.current_delay << std::endl;
+             << record.current_delay << ","
+             << record.real_throughput_bps << ","
+             << record.gcc_bw_bps << ","
+             << record.trace_bw_bps << ","
+             << record.scaled_bw_bps << std::endl;
     }
     
     file.close();

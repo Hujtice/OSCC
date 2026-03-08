@@ -2547,6 +2547,7 @@ void test_app_on_p2p (const std::string &instance, TimeConollerType controller_t
     uint32_t default_frame_width = 1920;
     for (int i=0;i<num;i++) {
         std::unique_ptr<WebrtcSessionManager> m(CreateWebrtcSessionManager(time_controller,max_rate*0.1,max_rate*0.2,max_rate,default_frame_height,default_frame_width, fps));
+        // std::unique_ptr<WebrtcSessionManager> m(CreateWebrtcSessionManager(time_controller,max_rate,max_rate,max_rate,default_frame_height,default_frame_width, fps));
         sesssion_manager.push_back(std::move(m)); 
     }
     UtilCalculator *calculator=UtilCalculator::Instance();

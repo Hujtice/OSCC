@@ -67,8 +67,14 @@ public:
         double mu;
         double reward_avg;
         Time timestamp;
+        double real_throughput_bps;
+        double avg_gcc_bw_bps;
+        double avg_trace_bw_bps;
+        double avg_scaled_bw_bps;
         FrameQoESummary() : frame_id(0), bandwidth_utilization(0.0), loss_rate(0.0),
-                            delay_avg(0.0), mu(1.0), reward_avg(0.0), timestamp(Seconds(0)) {}
+                            delay_avg(0.0), mu(1.0), reward_avg(0.0), timestamp(Seconds(0)),
+                            real_throughput_bps(0.0), avg_gcc_bw_bps(0.0),
+                            avg_trace_bw_bps(0.0), avg_scaled_bw_bps(0.0) {}
     };
 
     QoEIntegrationManager();
@@ -113,6 +119,11 @@ public:
     void OutputMuTrace(const std::string& filename) const;
     void OutputFrameQoE(const std::string& filename) const;
 
+    // 基于 seq 号的滑动窗口丢包估计（P1：实际观测丢包）
+    void ReportPacketSeq(uint32_t seq);
+    double GetObservedLossRate() const;
+
+
 private:
     // 逐帧累积（packet 级累加，OnFrameComplete 时汇总为 FrameQoESummary）
     struct FrameAccumulator {
@@ -121,9 +132,21 @@ private:
         double sum_reward;
         double sum_mu;
         double sum_loss;
+        double sum_real_throughput_bps;
+        double sum_gcc_bw_bps;
+        double sum_trace_bw_bps;
+        double sum_scaled_bw_bps;
         uint32_t count;
-        FrameAccumulator() : sum_bw_util(0), sum_delay(0), sum_reward(0), sum_mu(0), sum_loss(0), count(0) {}
+        FrameAccumulator() : sum_bw_util(0), sum_delay(0), sum_reward(0), sum_mu(0), sum_loss(0),
+                             sum_real_throughput_bps(0), sum_gcc_bw_bps(0), sum_trace_bw_bps(0),
+                             sum_scaled_bw_bps(0), count(0) {}
     };
+
+    // 接收端真实吞吐量滑动窗口：(接收时间, 包大小字节)
+    using ThroughputWindowEntry = std::pair<Time, uint32_t>;
+    static constexpr double kThroughputWindowSeconds = 0.5;
+    std::deque<ThroughputWindowEntry> throughput_window_;
+    double ComputeRealThroughputBps(Time now) const;
 
 private:
     RLStateManager* rl_manager_;
@@ -140,6 +163,14 @@ private:
     std::vector<MuChangeRecord> mu_change_records_;
     std::map<uint32_t, FrameAccumulator> frame_accumulator_;
     std::map<uint32_t, FrameQoESummary> frame_qoe_map_;
+
+    // 滑动窗口丢包追踪器（P1）
+    static constexpr size_t kLossWindowSize = 50;
+    uint32_t last_seq_ = 0;
+    bool first_packet_ = true;
+    uint32_t window_received_ = 0;
+    uint32_t window_expected_ = 0;
+    std::deque<std::pair<uint32_t, uint32_t>> loss_window_;  // (received, expected)
 };
 
 } // namespace oscc

@@ -29,12 +29,14 @@ public:
                           double miss_deadline_time, uint32_t Rt_current, uint32_t Rt_prev,
                           uint32_t frame_id, uint32_t packet_index);
     
-    // 记录包状态
+    // 记录包状态（含 real_throughput 与 bw_util 溯源字段）
     void RecordPacketState(uint32_t frame_id, uint32_t packet_index, double mu_used,
                           uint32_t Rt, double loss_rate, double reward,
                           Time send_time, Time recivied_time, Time deadline,
-                          double bandwidth_utilization, double p_delay, 
-                          double p_loss, double p_mddl, double current_delay_ms);
+                          double bandwidth_utilization, double p_delay,
+                          double p_loss, double p_mddl, double current_delay_ms,
+                          double real_throughput_bps, double gcc_bw_bps,
+                          double trace_bw_bps, double scaled_bw_bps);
     
     // Rt分组管理
     void AddPacketToRtGroup(uint32_t frame_id, uint32_t packet_index, uint32_t Rt, 
