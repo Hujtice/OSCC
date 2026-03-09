@@ -799,6 +799,20 @@ def add_scratch_programs(bld):
                 obj.target = filename
                 obj.name = obj.target
                 obj.install_path = None
+                
+                # 为 webrtc-TFMN-AC-RL1 添加 LibTorch 支持
+                if filename == 'webrtc-TFMN-AC-RL1':
+                    libtorch_root = '/usr/local/libtorch'
+                    obj.includes = ['#', 
+                                    libtorch_root + '/include',
+                                    libtorch_root + '/include/torch/csrc/api/include']
+                    obj.lib = ['torch', 'torch_cpu', 'c10']
+                    obj.libpath = [libtorch_root + '/lib']
+                    obj.rpath = [libtorch_root + '/lib']
+                    obj.defines = ['OSCC_USE_TORCH']
+                    # LibTorch 需要 C++17
+                    obj.env.append_value('CXXFLAGS', '-std=c++17')
+                    
             elif filename.endswith(".cc"):
                 name = filename[:-len(".cc")]
                 obj = bld.create_ns3_program(name, all_modules)

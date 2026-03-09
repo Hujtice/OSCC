@@ -324,7 +324,7 @@ cd scratch/webrtc-TFMN-AC-RL1/gym_agent
 nohup python3.12 train.py --algorithm PPO --timesteps 500000 > train_output.log 2>&1 &
 
 # 断点接训
-nohup python3.12 train.py --algorithm PPO --timesteps 100000 --load-model ./models/PPO_webrtc_mu_20260306_164444_830000_steps.zip > train_output.log 2>&1 &
+nohup python3.12 train.py --algorithm PPO --timesteps 100000 --load-model ./models/PPO_webrtc_mu_20260309_155425_140000_steps.zip > train_output.log 2>&1 &
 ```
 
 

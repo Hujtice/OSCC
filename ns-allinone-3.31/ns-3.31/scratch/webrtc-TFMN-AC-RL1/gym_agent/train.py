@@ -128,6 +128,11 @@ def main():
         print("\nInterrupted. Model saved to:", path)
     except Exception as e:
         print(f"\n[ERROR] {e}")
+        # [ERROR] ns3-ai finished (simulation ended) before first obs
+        if "ns3-ai finished (simulation ended) before first obs" in str(e):
+            path = os.path.join(args.model_dir, f"{model_name}_final")
+            model.save(path)
+            print("\nTraining completed. Model saved to:", path)
         sys.exit(1)
     finally:
         env.close()
