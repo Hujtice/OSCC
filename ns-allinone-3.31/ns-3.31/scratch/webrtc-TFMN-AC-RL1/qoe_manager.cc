@@ -92,10 +92,12 @@ void QoEIntegrationManager::OnPacketReceived(const FramePacketInfo& info, const 
         miss_deadline_time = (now - frame_stats.playout_deadline).GetSeconds();
     }
 
+    double out_U = 0.0, out_p_delay = 0.0, out_p_loss = 0.0, out_p_mddl = 0.0;
     double reward = rl_manager_->CalculateReward(
         mu, gcc_bw, real_trace_bw, delay_ms, observed_loss,
         miss_deadline_time, Rt, rl_manager_->GetLastPacketRt(),
-        info.frame_id, packet_idx);
+        info.frame_id, packet_idx,
+        &out_U, &out_p_delay, &out_p_loss, &out_p_mddl);
 
     double bw_util;
     if ((gcc_bw * mu) > real_trace_bw) {
@@ -115,7 +117,8 @@ void QoEIntegrationManager::OnPacketReceived(const FramePacketInfo& info, const 
 
     rl_manager_->RecordPacketState(info.frame_id, packet_idx, mu, Rt, observed_loss, reward,
                                    send_time, now, frame_stats.playout_deadline,
-                                   bw_util, 0, 0, 0, delay_ms,
+                                   bw_util, out_p_delay, out_p_loss, out_p_mddl, delay_ms,
+                                   miss_deadline_time,
                                    real_throughput_bps, gcc_bw, real_trace_bw, scaled_bw);
 
     // Mu trace: record when mu actually changed (for _mu_trace.csv)

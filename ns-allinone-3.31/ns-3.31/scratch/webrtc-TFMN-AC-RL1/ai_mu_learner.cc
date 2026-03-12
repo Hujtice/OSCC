@@ -11,6 +11,16 @@ void AiMuLearner::WriteStateToEnv(ShmEnv* env, const MuState& state) {
     env->norm_rt = static_cast<float>(std::min(state.rt / config_.rt_max, 1.0));
     env->norm_loss = static_cast<float>(std::min(state.loss / config_.loss_max, 1.0));
     env->reward = static_cast<float>(last_reward_);
+    env->U = static_cast<float>(last_U_);
+    env->p_delay = static_cast<float>(last_p_delay_);
+    env->p_loss = static_cast<float>(last_p_loss_);
+    env->p_mddl = static_cast<float>(last_p_mddl_);
+    env->raw_delay_ms = static_cast<float>(last_raw_delay_ms_);
+    env->raw_loss_rate = static_cast<float>(last_raw_loss_rate_);
+    env->raw_miss_deadline_s = static_cast<float>(last_raw_miss_deadline_s_);
+    env->gcc_bw_bps = static_cast<float>(last_gcc_bw_bps_);
+    env->trace_bw_bps = static_cast<float>(last_trace_bw_bps_);
+    env->frame_id = last_frame_id_;
     env->done = last_done_;
 }
 
@@ -21,7 +31,11 @@ AiMuLearner::AiMuLearner(const MuLearnerConfig& config, uint16_t shm_id)
       last_reward_(0.0),
       last_done_(0),
       baseline_(0.0),
-      step_count_(0) {
+      step_count_(0),
+      last_U_(0.0), last_p_delay_(0.0), last_p_loss_(0.0), last_p_mddl_(0.0),
+      last_raw_delay_ms_(0.0), last_raw_loss_rate_(0.0), last_raw_miss_deadline_s_(0.0),
+      last_gcc_bw_bps_(0.0), last_trace_bw_bps_(0.0),
+      last_frame_id_(0) {
     rl_ = std::make_unique<Ns3AIRL<ShmEnv, ShmAction, ns3::RLEmptyInfo>>(shm_id_);
     rl_->SetCond(2, 0);  // C++ waits for even version (Python Release increments version to even)
     std::cout << "=== AiMuLearner Initialized (ns3-ai) ===" << std::endl;
@@ -81,6 +95,16 @@ void AiMuLearner::Observe(const MuExperience& exp) {
     baseline_ = config_.baseline_decay * baseline_ + (1.0 - config_.baseline_decay) * exp.reward;
     last_reward_ = exp.reward;
     last_done_ = 0;  // continuous task, never done until simulation stops
+    last_U_ = exp.U;
+    last_p_delay_ = exp.p_delay;
+    last_p_loss_ = exp.p_loss;
+    last_p_mddl_ = exp.p_mddl;
+    last_raw_delay_ms_ = exp.raw_delay_ms;
+    last_raw_loss_rate_ = exp.raw_loss_rate;
+    last_raw_miss_deadline_s_ = exp.raw_miss_deadline_s;
+    last_gcc_bw_bps_ = exp.gcc_bw_bps;
+    last_trace_bw_bps_ = exp.trace_bw_bps;
+    last_frame_id_ = exp.frame_id;
     NS_LOG_DEBUG("Reward recorded: " << exp.reward << " (baseline: " << baseline_ << ")");
 }
 

@@ -3,7 +3,7 @@ Gymnasium/gym wrapper for ns3-ai shared memory (WebRTC mu learning).
 Bridges py_interface.Ns3AIRL with Stable-Baselines3 (step/observation_space/action_space).
 """
 import numpy as np
-from ctypes import Structure, c_float, c_uint8
+from ctypes import Structure, c_float, c_uint8, c_uint32
 
 try:
     import gymnasium as gym
@@ -19,6 +19,16 @@ class ShmEnv(Structure):
         ("norm_rt", c_float),
         ("norm_loss", c_float),
         ("reward", c_float),
+        ("U", c_float),
+        ("p_delay", c_float),
+        ("p_loss", c_float),
+        ("p_mddl", c_float),
+        ("raw_delay_ms", c_float),
+        ("raw_loss_rate", c_float),
+        ("raw_miss_deadline_s", c_float),
+        ("gcc_bw_bps", c_float),
+        ("trace_bw_bps", c_float),
+        ("frame_id", c_uint32),
         ("done", c_uint8),
     ]
 
@@ -50,6 +60,13 @@ class Ns3AiGymEnv(gym.Env):
         self._last_obs = np.zeros(2, dtype=np.float32)
         self._last_reward = 0.0
         self._last_done = False
+        self._last_info = {
+            "reward_U": 0.0, "reward_p_delay": 0.0, "reward_p_loss": 0.0,
+            "reward_p_mddl": 0.0, "reward_raw_delay_ms": 0.0,
+            "reward_raw_loss_rate": 0.0, "reward_raw_miss_deadline_s": 0.0,
+            "reward_gcc_bw_bps": 0.0, "reward_trace_bw_bps": 0.0,
+            "core_frame_id": 0,
+        }
         self._first_reset = True
         self.observation_space = spaces.Box(
             low=0.0, high=1.0, shape=(2,), dtype=np.float32
@@ -89,15 +106,28 @@ class Ns3AiGymEnv(gym.Env):
         # Acquire: get obs/reward/done that C++ wrote (after our previous action); then write our action
         with self._rl as data:
             if data is None:
-                return self._last_obs.copy(), self._last_reward, True, False, {}
+                return self._last_obs.copy(), self._last_reward, True, False, self._last_info
             obs = np.array([data.env.norm_rt, data.env.norm_loss], dtype=np.float32)
             reward = float(data.env.reward)
             done = bool(data.env.done)
+            info = {
+                "reward_U": float(data.env.U),
+                "reward_p_delay": float(data.env.p_delay),
+                "reward_p_loss": float(data.env.p_loss),
+                "reward_p_mddl": float(data.env.p_mddl),
+                "reward_raw_delay_ms": float(data.env.raw_delay_ms),
+                "reward_raw_loss_rate": float(data.env.raw_loss_rate),
+                "reward_raw_miss_deadline_s": float(data.env.raw_miss_deadline_s),
+                "reward_gcc_bw_bps": float(data.env.gcc_bw_bps),
+                "reward_trace_bw_bps": float(data.env.trace_bw_bps),
+                "core_frame_id": int(data.env.frame_id),
+            }
             data.act.mu = mu
         self._last_obs = obs
         self._last_reward = reward
         self._last_done = done
-        return obs.copy(), reward, done, False, {}
+        self._last_info = info
+        return obs.copy(), reward, done, False, info
 
     def close(self):
         """Release the shared memory pool.

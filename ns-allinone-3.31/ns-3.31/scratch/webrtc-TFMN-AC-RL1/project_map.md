@@ -313,7 +313,14 @@ pip3 install -r scratch/webrtc-TFMN-AC-RL1/gym_agent/requirements.txt
 # 终端1 - ns-3 仿真（先启动，等待 Python 通过共享内存连接）
 cd /home/hjt/OSCC/ns-allinone-3.31/ns-3.31
 nohup ./waf --run "scratch/webrtc-TFMN-AC-RL1/webrtc-TFMN-AC-RL1 \
-  --trace=traces/traces/AItrans/AItrans_6.log \
+  --trace=traces/traces/AItrans/AItrans_6_part_1.log \
+  --skip=true --mu=1.0 --ls=0.01 \
+  --folder=trace_results/ai_training --it=ai_test" \
+  > ns3输出 2>&1 &
+  > /dev/null 2>&1 &
+
+nohup ./waf --run "scratch/webrtc-TFMN-AC-RL1/webrtc-TFMN-AC-RL1 \
+  --trace=traces/traces/AItrans/AItrans_6_deal_cut/AItrans_6_part_2.log \
   --skip=true --mu=1.0 --ls=0.01 \
   --folder=trace_results/ai_training --it=ai_test" \
   > /dev/null 2>&1 &
@@ -321,10 +328,10 @@ nohup ./waf --run "scratch/webrtc-TFMN-AC-RL1/webrtc-TFMN-AC-RL1 \
 # 终端2 - Python 训练（后启动，shm_id 默认 1234）
 # 注意：必须用 python3.12，因为 python3 是 3.8（给 waf 用），ML 包装在 3.12 下
 cd scratch/webrtc-TFMN-AC-RL1/gym_agent
-nohup python3.12 train.py --algorithm PPO --timesteps 500000 > train_output.log 2>&1 &
+nohup python3.12 train.py --algorithm PPO --timesteps 5000000 > train_output.log 2>&1 &
 
 # 断点接训
-nohup python3.12 train.py --algorithm PPO --timesteps 100000 --load-model ./models/PPO_webrtc_mu_20260309_155425_140000_steps.zip > train_output.log 2>&1 &
+nohup python3.12 train.py --algorithm PPO --timesteps 8000000 --load-model ./models/PPO_webrtc_mu_20260310_174735_final.zip > train_output2.log 2>&1 &
 ```
 
 

@@ -95,7 +95,7 @@ cd /path/to/ns-3.31
 ```bash
 cd /path/to/ns-3.31
 ./waf --run "scratch/webrtc-TFMN-AC-RL1/webrtc-TFMN-AC-RL1 \
-  --trace=traces/traces/AItrans/AItrans_1.log \
+  --trace=traces/traces/AItrans/AItrans_2.log \
   --skip=true --mu=1.0 --ls=0.01 \
   --folder=trace_results/Altrans_case1 --it=/Altrans_case1"
 ```
@@ -103,12 +103,12 @@ cd /path/to/ns-3.31
 **终端 2**（在终端 1 启动后）：
 
 ```bash
-cd /path/to/ns-3.31/scratch/webrtc-TFMN-AC-RL1/gym_agent
+cd ~/OSCC/ns-allinone-3.31/ns-3.31/scratch/webrtc-TFMN-AC-RL1/gym_agent$
 python3.12 train.py --algorithm PPO --timesteps 10000
 ```
 
 断电续训的话，代码格式大致是这样
-python3.12 train.py --algorithm PPO --timesteps 100000   --load-model ./models/PPO_webrtc_mu_20260227_143451_final.zip
+python3.12 train.py --algorithm PPO --timesteps 100000   --load-model ./models/PPO_webrtc_mu_20260309_194252_final.zip
 
 
 **预期**：两端正常交换数据，Python 端有 step 与 reward 输出。

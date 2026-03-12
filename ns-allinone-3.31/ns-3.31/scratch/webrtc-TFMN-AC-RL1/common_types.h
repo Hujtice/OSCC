@@ -127,10 +127,25 @@ struct MuExperience {
     double reward;
     uint32_t frame_id;
     uint32_t rt_value;
+    double U;
+    double p_delay;
+    double p_loss;
+    double p_mddl;
+    double raw_delay_ms;
+    double raw_loss_rate;
+    double raw_miss_deadline_s;
+    double gcc_bw_bps;
+    double trace_bw_bps;
     
-    MuExperience() : reward(0.0), frame_id(0), rt_value(0) {}
+    MuExperience() : reward(0.0), frame_id(0), rt_value(0),
+                     U(0.0), p_delay(0.0), p_loss(0.0), p_mddl(0.0),
+                     raw_delay_ms(0.0), raw_loss_rate(0.0), raw_miss_deadline_s(0.0),
+                     gcc_bw_bps(0.0), trace_bw_bps(0.0) {}
     MuExperience(const MuState& s, const MuAction& a, double r, uint32_t fid, uint32_t rt)
-        : state(s), action(a), reward(r), frame_id(fid), rt_value(rt) {}
+        : state(s), action(a), reward(r), frame_id(fid), rt_value(rt),
+          U(0.0), p_delay(0.0), p_loss(0.0), p_mddl(0.0),
+          raw_delay_ms(0.0), raw_loss_rate(0.0), raw_miss_deadline_s(0.0),
+          gcc_bw_bps(0.0), trace_bw_bps(0.0) {}
 };
 
 // 学习器配置结构
@@ -153,10 +168,20 @@ struct MuLearnerConfig {
 // ns3-ai 共享内存数据结构（与 Python ctypes 布局一致，用于 AiMuLearner）
 // ============================================================================
 struct ShmEnv {
-    float norm_rt;      // 归一化 Rt (0~1)
-    float norm_loss;    // 归一化 loss (0~1)
-    float reward;       // 上一步奖励
-    uint8_t done;       // 是否结束 (0/1)
+    float norm_rt;              // 归一化 Rt (0~1)
+    float norm_loss;            // 归一化 loss (0~1)
+    float reward;               // 上一步奖励
+    float U;                    // 带宽利用率 (未加权)
+    float p_delay;              // 延迟惩罚 (未加权)
+    float p_loss;               // 丢包惩罚 (未加权)
+    float p_mddl;               // 超时惩罚 (未加权)
+    float raw_delay_ms;         // 原始延迟 (ms)
+    float raw_loss_rate;        // 原始丢包率
+    float raw_miss_deadline_s;  // 原始超时时间 (s)
+    float gcc_bw_bps;           // GCC 估计带宽 (bps)
+    float trace_bw_bps;         // Trace 链路带宽 (bps)
+    uint32_t frame_id;          // 当前 Rt 组对应的 frame_id
+    uint8_t done;               // 是否结束 (0/1)
 } __attribute__((packed));
 
 struct ShmAction {

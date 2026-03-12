@@ -48,6 +48,16 @@ private:
     uint8_t last_done_;
     double baseline_;
     uint32_t step_count_;
+    double last_U_;
+    double last_p_delay_;
+    double last_p_loss_;
+    double last_p_mddl_;
+    double last_raw_delay_ms_;
+    double last_raw_loss_rate_;
+    double last_raw_miss_deadline_s_;
+    double last_gcc_bw_bps_;
+    double last_trace_bw_bps_;
+    uint32_t last_frame_id_;
 
     void WriteStateToEnv(ShmEnv* env, const MuState& state);
 };

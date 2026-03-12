@@ -166,7 +166,7 @@ void InstallWebrtcApplication(Ptr<Node> sender,
     
     if (rl_manager != nullptr && bandwidth_changer != nullptr) {
         Ptr<ExponentialRandomVariable> interval = CreateObject<ExponentialRandomVariable>();
-        interval->SetAttribute("Mean", DoubleValue(0.01));
+        interval->SetAttribute("Mean", DoubleValue(0.01));// RL状态更新定时器的平均间隔，单位秒
         Simulator::Schedule(Seconds(0.1), &TriggerRLStateCalculation,
                         rl_manager, bandwidth_changer, interval, loss_rate);
     }

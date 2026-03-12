@@ -75,7 +75,9 @@ uint32_t RLStateManager::CalculateTransmissionOpportunities(Time current_time, T
 double RLStateManager::CalculateReward(double mu_prev, double gcc_bandwidth_bps, double trace_bandwidth_bps,
                                        double current_delay_ms, double current_loss_rate, 
                                        double miss_deadline_time, uint32_t Rt_current, uint32_t Rt_prev,
-                                       uint32_t frame_id, uint32_t packet_index) {
+                                       uint32_t frame_id, uint32_t packet_index,
+                                       double* out_U, double* out_p_delay,
+                                       double* out_p_loss, double* out_p_mddl) {
     // 确定使用的Rt值
     uint32_t Rt_used = Rt_prev;
     if (frame_id == 0 && packet_index == 0) {
@@ -150,6 +152,11 @@ double RLStateManager::CalculateReward(double mu_prev, double gcc_bandwidth_bps,
                   - loss_weight * p_loss 
                   - mddl_weight * p_mddl;
 
+    if (out_U) *out_U = U;
+    if (out_p_delay) *out_p_delay = p_delay;
+    if (out_p_loss) *out_p_loss = p_loss;
+    if (out_p_mddl) *out_p_mddl = p_mddl;
+
     NS_LOG_DEBUG("Rt_used: " << Rt_used << ", mu_prev: " << mu_prev << ", U: " << U);
     NS_LOG_DEBUG("p_delay: " << p_delay << ", p_loss: " << p_loss << ", p_mddl: " << p_mddl);
     
@@ -161,6 +168,7 @@ void RLStateManager::RecordPacketState(uint32_t frame_id, uint32_t packet_index,
                                        Time send_time, Time recivied_time, Time deadline,
                                        double bandwidth_utilization, double p_delay,
                                        double p_loss, double p_mddl, double current_delay_ms,
+                                       double miss_deadline_s,
                                        double real_throughput_bps, double gcc_bw_bps,
                                        double trace_bw_bps, double scaled_bw_bps) {
     PacketStateRecord record;
@@ -186,7 +194,9 @@ void RLStateManager::RecordPacketState(uint32_t frame_id, uint32_t packet_index,
     packet_records_.push_back(record);
     last_packet_Rt_ = Rt;
     
-    AddPacketToRtGroup(frame_id, packet_index, Rt, loss_rate, reward, send_time, mu_used);
+    AddPacketToRtGroup(frame_id, packet_index, Rt, loss_rate, reward, send_time, mu_used,
+                       bandwidth_utilization, p_delay, p_loss, p_mddl,
+                       current_delay_ms, loss_rate, miss_deadline_s, gcc_bw_bps, trace_bw_bps);
     
     NS_LOG_INFO("Recorded REAL packet state: frame=" << frame_id << ", packet=" << packet_index
                << ", mu=" << mu_used << ", Rt=" << Rt << ", loss_rate=" << loss_rate 
@@ -196,7 +206,10 @@ void RLStateManager::RecordPacketState(uint32_t frame_id, uint32_t packet_index,
 }
 
 void RLStateManager::AddPacketToRtGroup(uint32_t frame_id, uint32_t packet_index, uint32_t Rt, 
-                                        double loss_rate, double reward, Time send_time, double mu_used) {
+                                        double loss_rate, double reward, Time send_time, double mu_used,
+                                        double U, double p_delay, double p_loss, double p_mddl,
+                                        double raw_delay_ms, double raw_loss_rate,
+                                        double raw_miss_deadline_s, double gcc_bw_bps, double trace_bw_bps) {
     if (current_rt_group_.frame_id != frame_id || current_rt_group_.Rt_value != Rt) {
         if (current_rt_group_.packet_count > 0) {
             FinalizeCurrentRtGroup();
@@ -209,11 +222,29 @@ void RLStateManager::AddPacketToRtGroup(uint32_t frame_id, uint32_t packet_index
         current_rt_group_.avg_reward = 0.0;
         current_rt_group_.packet_count = 0;
         current_rt_group_.reward_sum = 0.0;
+        current_rt_group_.sum_U = 0.0;
+        current_rt_group_.sum_p_delay = 0.0;
+        current_rt_group_.sum_p_loss = 0.0;
+        current_rt_group_.sum_p_mddl = 0.0;
+        current_rt_group_.sum_raw_delay_ms = 0.0;
+        current_rt_group_.sum_raw_loss_rate = 0.0;
+        current_rt_group_.sum_raw_miss_deadline_s = 0.0;
+        current_rt_group_.sum_gcc_bw_bps = 0.0;
+        current_rt_group_.sum_trace_bw_bps = 0.0;
         current_rt_group_.start_time = send_time;
     }
     
     current_rt_group_.packet_count++;
     current_rt_group_.reward_sum += reward;
+    current_rt_group_.sum_U += U;
+    current_rt_group_.sum_p_delay += p_delay;
+    current_rt_group_.sum_p_loss += p_loss;
+    current_rt_group_.sum_p_mddl += p_mddl;
+    current_rt_group_.sum_raw_delay_ms += raw_delay_ms;
+    current_rt_group_.sum_raw_loss_rate += raw_loss_rate;
+    current_rt_group_.sum_raw_miss_deadline_s += raw_miss_deadline_s;
+    current_rt_group_.sum_gcc_bw_bps += gcc_bw_bps;
+    current_rt_group_.sum_trace_bw_bps += trace_bw_bps;
     current_rt_group_.end_time = send_time;
 }
 
@@ -243,10 +274,20 @@ void RLStateManager::FinalizeCurrentRtGroup() {
         
         // MuLearner更新
         if (learner_enabled_ && mu_learner_) {
+            double n = static_cast<double>(current_rt_group_.packet_count);
             MuState state(static_cast<double>(current_rt_group_.Rt_value), current_rt_group_.loss_rate);
             MuAction action(current_rt_group_.mu_used);
             MuExperience exp(state, action, current_rt_group_.avg_reward, 
                             current_rt_group_.frame_id, current_rt_group_.Rt_value);
+            exp.U = current_rt_group_.sum_U / n;
+            exp.p_delay = current_rt_group_.sum_p_delay / n;
+            exp.p_loss = current_rt_group_.sum_p_loss / n;
+            exp.p_mddl = current_rt_group_.sum_p_mddl / n;
+            exp.raw_delay_ms = current_rt_group_.sum_raw_delay_ms / n;
+            exp.raw_loss_rate = current_rt_group_.sum_raw_loss_rate / n;
+            exp.raw_miss_deadline_s = current_rt_group_.sum_raw_miss_deadline_s / n;
+            exp.gcc_bw_bps = current_rt_group_.sum_gcc_bw_bps / n;
+            exp.trace_bw_bps = current_rt_group_.sum_trace_bw_bps / n;
             
             mu_learner_->Observe(exp);
             mu_learner_->MaybeUpdate();

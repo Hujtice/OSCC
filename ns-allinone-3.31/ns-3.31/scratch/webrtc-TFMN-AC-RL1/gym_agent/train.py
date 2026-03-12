@@ -18,10 +18,13 @@ _PY_INTERFACE = os.path.join(_NS3_ROOT, "src", "ns3-ai", "py_interface")
 if os.path.isdir(_PY_INTERFACE):
     sys.path.insert(0, _PY_INTERFACE)
 
+import csv
+
 try:
     import numpy as np
+    import torch as th
     from stable_baselines3 import PPO, SAC, TD3
-    from stable_baselines3.common.callbacks import CheckpointCallback
+    from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
     from stable_baselines3.common.monitor import Monitor
 except ImportError as e:
     print(f"ERROR: Missing dependency: {e}")
@@ -38,6 +41,140 @@ except ImportError as e:
     sys.exit(1)
 
 from ns3ai_env import Ns3AiGymEnv
+
+# Reward weights (must match C++ rl_state_manager.cc)
+_W_U = 2.5
+_W_DELAY = 10.0
+_W_LOSS = 10.0
+_W_MDDL = 10.0
+
+_CSV_HEADER = [
+    # core (7)
+    "core_timestep", "core_frame_id", "core_norm_rt", "core_norm_loss",
+    "core_reward", "core_action_mu", "core_value_estimate",
+    # ext (5)
+    "ext_action_mean", "ext_action_std", "ext_action_log_prob",
+    "ext_episode_reward_cum", "ext_episode_length",
+    # reward raw (5)
+    "reward_raw_delay_ms", "reward_raw_loss_rate", "reward_raw_miss_deadline_s",
+    "reward_gcc_bw_bps", "reward_trace_bw_bps",
+    # reward unweighted (4)
+    "reward_U", "reward_p_delay", "reward_p_loss", "reward_p_mddl",
+    # reward weighted (5, computed in Python)
+    "reward_weighted_U", "reward_weighted_delay",
+    "reward_weighted_loss", "reward_weighted_mddl", "reward_total",
+]
+
+
+class StepLoggerCallback(BaseCallback):
+    """Log per-timestep RL data to a CSV file (25 columns)."""
+
+    def __init__(self, log_path: str, verbose: int = 0):
+        super().__init__(verbose)
+        self.log_path = log_path
+        self._file = None
+        self._writer = None
+        self._ep_reward = 0.0
+        self._ep_len = 0
+
+    def _on_training_start(self) -> None:
+        self._file = open(self.log_path, "w", newline="")
+        self._writer = csv.writer(self._file)
+        self._writer.writerow(_CSV_HEADER)
+
+    def _on_step(self) -> bool:
+        infos = self.locals.get("infos", [{}])
+        info = infos[0] if infos else {}
+
+        rewards = self.locals.get("rewards", np.array([0.0]))
+        reward = float(rewards[0])
+        actions = self.locals.get("actions", np.array([[1.0]]))
+        action_mu = float(actions[0][0])
+
+        # --- core: value estimate (PPO stores it in locals) ---
+        values_t = self.locals.get("values")
+        if values_t is not None:
+            value_est = float(values_t[0])
+        else:
+            value_est = float("nan")
+
+        # --- ext: action_mean, action_std, log_prob ---
+        log_probs_t = self.locals.get("log_probs")
+        log_prob = float(log_probs_t[0]) if log_probs_t is not None else float("nan")
+
+        obs_tensor = self.locals.get("obs_tensor")
+        if obs_tensor is not None:
+            with th.no_grad():
+                dist = self.model.policy.get_distribution(obs_tensor)
+                action_mean = float(dist.distribution.mean[0][0])
+                action_std = float(dist.distribution.stddev[0][0])
+        else:
+            action_mean = float("nan")
+            action_std = float("nan")
+
+        # --- core: observation that led to this action ---
+        if obs_tensor is not None:
+            obs_np = obs_tensor[0].cpu().numpy()
+            norm_rt = float(obs_np[0])
+            norm_loss = float(obs_np[1])
+        else:
+            new_obs = self.locals.get("new_obs", np.array([[0.0, 0.0]]))
+            norm_rt = float(new_obs[0][0])
+            norm_loss = float(new_obs[0][1])
+
+        # --- ext: episode cumulative tracking ---
+        self._ep_reward += reward
+        self._ep_len += 1
+
+        # --- core: frame_id from C++ ---
+        frame_id = info.get("core_frame_id", 0)
+
+        # --- reward sub-items from C++ via info dict ---
+        r_U = info.get("reward_U", 0.0)
+        r_pd = info.get("reward_p_delay", 0.0)
+        r_pl = info.get("reward_p_loss", 0.0)
+        r_pm = info.get("reward_p_mddl", 0.0)
+        r_raw_delay = info.get("reward_raw_delay_ms", 0.0)
+        r_raw_loss = info.get("reward_raw_loss_rate", 0.0)
+        r_raw_mddl = info.get("reward_raw_miss_deadline_s", 0.0)
+        r_gcc = info.get("reward_gcc_bw_bps", 0.0)
+        r_trace = info.get("reward_trace_bw_bps", 0.0)
+
+        # weighted values (computed in Python)
+        w_U = _W_U * r_U
+        w_delay = -_W_DELAY * r_pd
+        w_loss = -_W_LOSS * r_pl
+        w_mddl = -_W_MDDL * r_pm
+        w_total = w_U + w_delay + w_loss + w_mddl
+
+        self._writer.writerow([
+            self.num_timesteps, frame_id,
+            f"{norm_rt:.6f}", f"{norm_loss:.6f}",
+            f"{reward:.6f}", f"{action_mu:.6f}", f"{value_est:.6f}",
+            f"{action_mean:.6f}", f"{action_std:.6f}", f"{log_prob:.6f}",
+            f"{self._ep_reward:.6f}", self._ep_len,
+            f"{r_raw_delay:.4f}", f"{r_raw_loss:.6f}", f"{r_raw_mddl:.6f}",
+            f"{r_gcc:.2f}", f"{r_trace:.2f}",
+            f"{r_U:.6f}", f"{r_pd:.6f}", f"{r_pl:.6f}", f"{r_pm:.6f}",
+            f"{w_U:.6f}", f"{w_delay:.6f}", f"{w_loss:.6f}", f"{w_mddl:.6f}",
+            f"{w_total:.6f}",
+        ])
+        if self.num_timesteps % 100 == 0:
+            self._file.flush()
+
+        # reset episode accumulators on done
+        dones = self.locals.get("dones", np.array([False]))
+        if bool(dones[0]):
+            self._ep_reward = 0.0
+            self._ep_len = 0
+
+        return True
+
+    def _on_training_end(self) -> None:
+        if self._file:
+            self._file.close()
+            self._file = None
+
 
 # POSIX 共享内存 key，传给 shmget()，必须与 ns-3 GlobalValue "SharedMemoryKey" 一致
 SHM_KEY = 1234
@@ -110,13 +247,16 @@ def main():
     checkpoint_callback = CheckpointCallback(
         save_freq=10000, save_path=args.model_dir, name_prefix=model_name
     )
+    step_csv_path = os.path.join(args.log_dir, "step_log.csv")
+    step_logger = StepLoggerCallback(log_path=step_csv_path, verbose=0)
+    print(f"  Step CSV: {step_csv_path}")
 
     print(f"\n[4/4] Training for {args.timesteps} timesteps...")
     print("-" * 60)
     try:
         model.learn(
             total_timesteps=args.timesteps,
-            callback=checkpoint_callback,
+            callback=[checkpoint_callback, step_logger],
             tb_log_name=model_name,
         )
         path = os.path.join(args.model_dir, f"{model_name}_final")
