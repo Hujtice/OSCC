@@ -296,7 +296,7 @@ void test_app_on_p2p(const std::string& instance, TimeConollerType controller_ty
     uint32_t default_frame_width = 1920;
     for (int i = 0; i < num; i++) {
         std::unique_ptr<WebrtcSessionManager> m(CreateWebrtcSessionManager(
-            time_controller, max_rate * 0.5, max_rate * 0.8, max_rate, 
+            time_controller, max_rate * 0.1, max_rate * 0.2, max_rate, 
             default_frame_height, default_frame_width, fps));
         sesssion_manager.push_back(std::move(m)); 
     }
@@ -354,7 +354,7 @@ void test_app_on_p2p(const std::string& instance, TimeConollerType controller_ty
         MuLearnerConfig config;
         config.mu_min = 0.5;
         config.mu_max = 1.5;
-        config.rt_max = 5.0; //20.0;
+        config.rt_max = 10.0; //20.0;
         config.loss_max = 0.1;
         config.baseline_decay = 0.95;
         

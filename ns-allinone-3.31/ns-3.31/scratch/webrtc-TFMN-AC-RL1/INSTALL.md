@@ -108,7 +108,7 @@ python3.12 train.py --algorithm PPO --timesteps 10000
 ```
 
 断电续训的话，代码格式大致是这样
-python3.12 train.py --algorithm PPO --timesteps 100000   --load-model ./models/PPO_webrtc_mu_20260309_194252_final.zip
+python3.12 train.py --algorithm PPO --timesteps 100000   --load-model ./OSCC1/bak/PPO_webrtc_mu_20260310_210829_final.zip
 
 
 **预期**：两端正常交换数据，Python 端有 step 与 reward 输出。

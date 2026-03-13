@@ -58,16 +58,27 @@ uint32_t RLStateManager::CalculateTransmissionOpportunities(Time current_time, T
 
     uint32_t Rt = static_cast<uint32_t>(std::floor(available_time.GetSeconds() / current_rtt_.GetSeconds()));
     
-    NS_LOG_DEBUG("Transmission opportunities calculation:");
-    NS_LOG_DEBUG("  Current time: " << current_time.GetSeconds() << "s");
-    NS_LOG_DEBUG("  Frame deadline: " << frame_deadline.GetSeconds() << "s");
-    NS_LOG_DEBUG("  T_remain: " << T_remain.GetSeconds() << "s");
-    NS_LOG_DEBUG("  Packet size: " << packet_size << " bytes");
-    NS_LOG_DEBUG("  Trace bandwidth: " << trace_bandwidth_bps << " bps");
-    NS_LOG_DEBUG("  Packet send time: " << packet_send_time.GetSeconds() << "s");
-    NS_LOG_DEBUG("  Available time: " << available_time.GetSeconds() << "s");
-    NS_LOG_DEBUG("  RTT: " << current_rtt_.GetSeconds() << "s");
-    NS_LOG_DEBUG("  Rt: " << Rt);
+    // NS_LOG_DEBUG("Transmission opportunities calculation:");
+    // NS_LOG_DEBUG("  Current time: " << current_time.GetSeconds() << "s");
+    // NS_LOG_DEBUG("  Frame deadline: " << frame_deadline.GetSeconds() << "s");
+    // NS_LOG_DEBUG("  T_remain: " << T_remain.GetSeconds() << "s");
+    // NS_LOG_DEBUG("  Packet size: " << packet_size << " bytes");
+    // NS_LOG_DEBUG("  Trace bandwidth: " << trace_bandwidth_bps << " bps");
+    // NS_LOG_DEBUG("  Packet send time: " << packet_send_time.GetSeconds() << "s");
+    // NS_LOG_DEBUG("  Available time: " << available_time.GetSeconds() << "s");
+    // NS_LOG_DEBUG("  RTT: " << current_rtt_.GetSeconds() << "s");
+    // NS_LOG_DEBUG("  Rt: " << Rt);
+    
+    std::cout << "计算传输机会："
+              << "当前时间: " << current_time.GetSeconds() << "s" << std::endl
+              << "截止时间: " << frame_deadline.GetSeconds() << "s" << std::endl
+              << "剩余时间: " << T_remain.GetSeconds() << "s" << std::endl
+              << "包大小: " << packet_size << " bytes" << std::endl
+              << "带宽: " << trace_bandwidth_bps << " bps" << std::endl
+              << "包发送时间: " << packet_send_time.GetSeconds() << "s" << std::endl
+              << "可用时间: " << available_time.GetSeconds() << "s" << std::endl
+              << "RTT的值: " << current_rtt_.GetSeconds() << "s" << std::endl
+              << "Rt的值: " << Rt << std::endl;
     
     return Rt;
 }

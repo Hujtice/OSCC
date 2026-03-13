@@ -22,6 +22,23 @@ void AiMuLearner::WriteStateToEnv(ShmEnv* env, const MuState& state) {
     env->trace_bw_bps = static_cast<float>(last_trace_bw_bps_);
     env->frame_id = last_frame_id_;
     env->done = last_done_;
+
+    std::cout << "写入共享内存："
+                << "norm_rt的值是: " << env->norm_rt
+                << "norm_loss的值是: " << env->norm_loss
+                << "reward的值是: " << env->reward
+                << "U的值是: " << env->U
+                << "p_delay的值是: " << env->p_delay
+                << "p_loss的值是: " << env->p_loss
+                << "p_mddl的值是: " << env->p_mddl
+                << "raw_delay_ms的值是: " << env->raw_delay_ms
+                << "raw_loss_rate的值是: " << env->raw_loss_rate
+                << "raw_miss_deadline_s的值是: " << env->raw_miss_deadline_s
+                << "gcc_bw_bps的值是: " << env->gcc_bw_bps
+                << "trace_bw_bps的值是: " << env->trace_bw_bps
+                << "frame_id的值是: " << env->frame_id
+                << "done的值是: " << env->done
+                << std::endl;
 }
 
 AiMuLearner::AiMuLearner(const MuLearnerConfig& config, uint16_t shm_id)

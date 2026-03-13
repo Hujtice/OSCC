@@ -48,10 +48,14 @@ _W_DELAY = 10.0
 _W_LOSS = 10.0
 _W_MDDL = 10.0
 
+_RT_MAX = 5.0
+_LOSS_MAX = 0.1
+
 _CSV_HEADER = [
-    # core (7)
-    "core_timestep", "core_frame_id", "core_norm_rt", "core_norm_loss",
-    "core_reward", "core_action_mu", "core_value_estimate",
+    # core (10)
+    "core_timestep", "core_frame_id",
+    "core_raw_rt", "core_raw_loss", "core_norm_rt", "core_norm_loss",
+    "core_reward", "core_action_mu_raw", "core_action_mu", "core_value_estimate",
     # ext (5)
     "ext_action_mean", "ext_action_std", "ext_action_log_prob",
     "ext_episode_reward_cum", "ext_episode_length",
@@ -89,7 +93,11 @@ class StepLoggerCallback(BaseCallback):
         rewards = self.locals.get("rewards", np.array([0.0]))
         reward = float(rewards[0])
         actions = self.locals.get("actions", np.array([[1.0]]))
-        action_mu = float(actions[0][0])
+        action_mu_raw = float(actions[0][0])
+        mu_min, mu_max = 0.8, 1.2
+        mu_mid = (mu_min + mu_max) / 2.0    # 1.0
+        mu_half = (mu_max - mu_min) / 2.0   # 0.2
+        action_mu = mu_mid + mu_half * np.tanh(action_mu_raw)
 
         # --- core: value estimate (PPO stores it in locals) ---
         values_t = self.locals.get("values")
@@ -122,6 +130,10 @@ class StepLoggerCallback(BaseCallback):
             norm_rt = float(new_obs[0][0])
             norm_loss = float(new_obs[0][1])
 
+        # --- core: de-normalize to raw values ---
+        raw_rt = norm_rt * _RT_MAX
+        raw_loss = norm_loss * _LOSS_MAX
+
         # --- ext: episode cumulative tracking ---
         self._ep_reward += reward
         self._ep_len += 1
@@ -149,8 +161,8 @@ class StepLoggerCallback(BaseCallback):
 
         self._writer.writerow([
             self.num_timesteps, frame_id,
-            f"{norm_rt:.6f}", f"{norm_loss:.6f}",
-            f"{reward:.6f}", f"{action_mu:.6f}", f"{value_est:.6f}",
+            f"{raw_rt:.2f}", f"{raw_loss:.6f}", f"{norm_rt:.6f}", f"{norm_loss:.6f}",
+            f"{reward:.6f}", f"{action_mu_raw:.6f}", f"{action_mu:.6f}", f"{value_est:.6f}",
             f"{action_mean:.6f}", f"{action_std:.6f}", f"{log_prob:.6f}",
             f"{self._ep_reward:.6f}", self._ep_len,
             f"{r_raw_delay:.4f}", f"{r_raw_loss:.6f}", f"{r_raw_mddl:.6f}",

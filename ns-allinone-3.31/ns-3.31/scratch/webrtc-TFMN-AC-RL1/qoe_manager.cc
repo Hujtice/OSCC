@@ -84,8 +84,10 @@ void QoEIntegrationManager::OnPacketReceived(const FramePacketInfo& info, const 
     }
 
     // 计算奖励：gcc_bw 做分子、real_trace_bw 做分母（P3）
-    // uint32_t packet_idx = info.is_first_packet ? 0 : 1;
-    uint32_t packet_idx = info.seq;
+    // 注意：为了在 RL_log.csv 中能清晰区分同一帧内的各个包，这里将 packet_index 定义为“帧内包序号”（从 0 开始）
+    uint32_t packet_idx = frame_stats.packets_received > 0
+        ? frame_stats.packets_received - 1
+        : 0;
 
     double miss_deadline_time = 0.0;
     if (now > frame_stats.playout_deadline) {
