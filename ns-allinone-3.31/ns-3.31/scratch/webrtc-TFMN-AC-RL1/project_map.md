@@ -343,6 +343,22 @@ nohup python3.12 train.py --algorithm PPO --timesteps 8000000 --load-model ./mod
 
 
 
+```bash
+# 创建NAS上存放目录
+mkdir -p /mnt/nasDisk_ds3617/OSCC_project_backups/webrtc-TFMN/
+
+# 移动
+sudo mv logs/ /mnt/nasDisk_ds3617/OSCC_project_backups/webrtc-TFMN/
+sudo mv models/ /mnt/nasDisk_ds3617/OSCC_project_backups/webrtc-TFMN/
+sudo mv ai_training/ /mnt/nasDisk_ds3617/OSCC_project_backups/webrtc-TFMN/
+
+# 创建 logs 的软链接
+ln -s /mnt/nasDisk_ds3617/OSCC_project_backups/webrtc-TFMN/logs ./logs
+
+# 创建 models 的软链接
+ln -s /mnt/nasDisk_ds3617/OSCC_project_backups/webrtc-TFMN/models ./models
+```
+
 ## Trace 文件格式
 
 每行 4 列，空格分隔：`time(s) bandwidth(Mbps) rtt(ms) loss(0-1)`

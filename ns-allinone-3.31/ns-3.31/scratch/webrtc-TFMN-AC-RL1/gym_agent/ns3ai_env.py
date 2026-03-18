@@ -102,7 +102,8 @@ class Ns3AiGymEnv(gym.Env):
         calculates the reward, and writes it together with the next observation.
         """
         # action is [mu] from SB3; clip to [0.5, 1.5]
-        mu_min, mu_max = 0.8, 1.2
+        mu_min, mu_max = 1, 1
+        # mu_min, mu_max = 1.0, 1.0
         mu_mid = (mu_min + mu_max) / 2.0    # 1.0
         mu_half = (mu_max - mu_min) / 2.0   # 0.2
         mu = mu_mid + mu_half * np.tanh(action[0])

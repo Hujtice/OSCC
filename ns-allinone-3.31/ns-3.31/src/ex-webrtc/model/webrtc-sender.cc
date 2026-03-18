@@ -105,38 +105,42 @@ void WebrtcSender::SetBandwidthScaleFactorDirect(double factor) {
 }
 
 // OSCC集成：运行时动态更新μ值并立即应用到GCC
+// OSCC/HRCC 集成：运行时动态更新 μ，并触发一次带宽调整
 void WebrtcSender::UpdateMuDynamic(double new_mu) {
-    // 验证μ值范围（OSCC规定的范围是[0.5, 1.5]）
-    if (new_mu >= 0.5 && new_mu <= 1.5) {
-        double old_mu = m_bandwidth_scale_factor;
-        
-        // 只有当μ值发生变化时才更新
-        if (std::abs(new_mu - old_mu) > 0.001) {
-            m_bandwidth_scale_factor = new_mu;
-            
-            NS_LOG_INFO("WebrtcSender: OSCC dynamic mu update: " << old_mu << " -> " << new_mu);
-            std::cout << "[OSCC-Sender] Dynamic mu update at " << Simulator::Now().GetSeconds() 
-                      << "s: " << old_mu << " -> " << new_mu << std::endl;
-            
-            // ========== 关键修复：直接调用 ApplyBandwidthScalingToController ==========
-            // 而不是调用 ApplyPendingBitrate（需要设置 m_has_pending_bw 等参数）
-            // ApplyBandwidthScalingToController 会读取最新的 m_bandwidth_scale_factor 并应用
-            if (m_context != 0) {
-                Simulator::ScheduleWithContext(m_context, Time(MilliSeconds(1)), 
-                    &WebrtcSender::ApplyBandwidthScalingToController, this);
-            } else if (GetNode()) {
-                Simulator::ScheduleWithContext(GetNode()->GetId(), Time(MilliSeconds(1)), 
-                    &WebrtcSender::ApplyBandwidthScalingToController, this);
-            } else {
-                Simulator::Schedule(Time(MilliSeconds(1)), 
-                    &WebrtcSender::ApplyBandwidthScalingToController, this);
-            }
-            
-            std::cout << "[OSCC-Sender] Scheduled ApplyBandwidthScalingToController with new mu=" 
-                      << new_mu << std::endl;
-        }
-    } else {
+    // μ 范围 [0.5, 1.5]，超出直接忽略
+    if (new_mu < 0.5 || new_mu > 1.5) {
         NS_LOG_WARN("WebrtcSender: OSCC mu value out of range [0.5, 1.5]: " << new_mu);
+        return;
+    }
+
+    double old_mu = m_bandwidth_scale_factor;
+    if (std::abs(new_mu - old_mu) < 0.001) {
+        // 变化太小，不更新
+        return;
+    }
+
+    m_bandwidth_scale_factor = new_mu;
+
+    NS_LOG_INFO("WebrtcSender: OSCC dynamic mu update: " << old_mu << " -> " << new_mu);
+    std::cout << "[OSCC-Sender] Dynamic mu update at " << Simulator::Now().GetSeconds()
+              << "s: " << old_mu << " -> " << new_mu << std::endl;
+
+    // 关键：不再直接改 BitrateConstraints，而是按 HRCC 思路：
+    // 由 ApplyBandwidthScalingToController 读取当前 GCC 带宽，
+    // 算 target_bw = gcc_bw * mu，再通过 SetTargetBitrate(target_bw) 交给底层。
+    uint32_t ctx = m_context;
+    if (ctx == 0 && GetNode()) {
+        ctx = static_cast<uint32_t>(GetNode()->GetId());
+    }
+
+    if (ctx != 0) {
+        Simulator::ScheduleWithContext(
+            ctx, Time(MilliSeconds(1)),
+            &WebrtcSender::ApplyBandwidthScalingToController, this);
+    } else {
+        Simulator::Schedule(
+            Time(MilliSeconds(1)),
+            &WebrtcSender::ApplyBandwidthScalingToController, this);
     }
 }
 
@@ -581,80 +585,113 @@ void WebrtcSender::StopApplication(){
     std::cout << "WebrtcSender: Application stopped" << std::endl;
 }
 
+
 //==================== Apply Bandwidth Scaling via BitrateConstraints (方案A) =====================
-void WebrtcSender::ApplyBandwidthScalingToController() {
-    std::cout << "[DEBUG] ApplyBandwidthScalingToController called" << std::endl;
-    if(!m_call){ std::cout<<"[DEBUG] m_call is null!"<<std::endl; return; }
+// void WebrtcSender::ApplyBandwidthScalingToController() {
+//     std::cout << "[DEBUG] ApplyBandwidthScalingToController called" << std::endl;
+//     if(!m_call){ std::cout<<"[DEBUG] m_call is null!"<<std::endl; return; }
     
-    auto* transport_controller = m_call->GetTransportControllerSend();
-    if(!transport_controller){ 
-        std::cout<<"[DEBUG] transport_controller is null!"<<std::endl; 
-        return; 
+//     auto* transport_controller = m_call->GetTransportControllerSend();
+//     if(!transport_controller){ 
+//         std::cout<<"[DEBUG] transport_controller is null!"<<std::endl; 
+//         return; 
+//     }
+
+//     double current_mu = GetCurrentBandwidthScaleFactor();
+//     uint32_t gcc_bandwidth = m_call->last_bandwidth_bps();
+    
+//     // 如果GCC还没有估计出带宽，使用默认值
+//     if (gcc_bandwidth == 0) {
+//         gcc_bandwidth = 2500000; // 默认2.5 Mbps
+//         std::cout << "[WARNING] GCC bandwidth is 0, using default 2.5 Mbps" << std::endl;
+//     }
+    
+//     // ========== OSCC修复：避免累积效应 ==========
+//     // 问题：如果直接用 last_bandwidth_bps() * current_mu，会导致累积：
+//     //   第一次：3M * 1.05 = 3.15M → 设置为 max_bitrate
+//     //   第二次：3.15M * 1.1 = 3.465M（错误！应该是 3M * 1.1 = 3.3M）
+//     // 解决：保存"基准带宽"，每次都用 基准带宽 * current_mu
+    
+//     // 如果还没有基准带宽，或者这是首次调速（μ=1），保存当前值为基准
+//     if (m_base_gcc_bandwidth == 0 || (current_mu == 1.0 && m_last_applied_mu == 1.0)) {
+//         m_base_gcc_bandwidth = gcc_bandwidth;
+//         std::cout << "[OSCC-FIX] Base GCC bandwidth set to: " << (m_base_gcc_bandwidth / 1000000.0) << " Mbps" << std::endl;
+//     } else if (m_last_applied_mu != 1.0 && current_mu != m_last_applied_mu) {
+//         // 如果上次应用的μ不是1，需要还原：base = last_bandwidth / last_mu
+//         // 但这可能会有误差累积，更好的方法是检测到GCC带宽大幅下降时重置基准
+//         uint32_t estimated_base = static_cast<uint32_t>(gcc_bandwidth / m_last_applied_mu);
+        
+//         // 只有当GCC带宽明显下降时（可能是网络变化），才更新基准
+//         if (gcc_bandwidth < m_base_gcc_bandwidth * 0.5) {
+//             // GCC带宽大幅下降，可能是网络拥塞，重置基准
+//             m_base_gcc_bandwidth = estimated_base;
+//             std::cout << "[OSCC-FIX] Base bandwidth reset due to congestion: " << (m_base_gcc_bandwidth / 1000000.0) << " Mbps" << std::endl;
+//         }
+//     }
+    
+//     // 使用基准带宽计算缩放后的带宽
+//     uint32_t scaled_bandwidth = static_cast<uint32_t>(m_base_gcc_bandwidth * current_mu);
+    
+//     // 保存本次应用的μ值
+//     m_last_applied_mu = current_mu;
+    
+//     // ========== 方案A：通过BitrateConstraints限制WebRTC内部的发送带宽 ==========
+//     webrtc::BitrateConstraints constraints;
+//     constraints.min_bitrate_bps = 50000;  // 50 kbps
+//     constraints.start_bitrate_bps = scaled_bandwidth;
+//     constraints.max_bitrate_bps = scaled_bandwidth;
+    
+//     try {
+//         transport_controller->SetSdpBitrateParameters(constraints);
+        
+//         std::cout << "=== WebrtcSender: BitrateConstraints Applied (方案A) ===" << std::endl;
+//         std::cout << "Time: " << Simulator::Now().GetSeconds() << "s" << std::endl;
+//         std::cout << "Base GCC Bandwidth: " << (m_base_gcc_bandwidth / 1000000.0) << " Mbps" << std::endl;
+//         std::cout << "Current GCC reported: " << (gcc_bandwidth / 1000000.0) << " Mbps" << std::endl;
+//         std::cout << "Bandwidth scale factor μ: " << current_mu << std::endl;
+//         std::cout << "Scaled Bandwidth (max_bitrate): " << (scaled_bandwidth / 1000000.0) << " Mbps" << std::endl;
+//         std::cout << "=====================================================" << std::endl;
+        
+//         NS_LOG_INFO("WebrtcSender: BitrateConstraints applied - μ=" << current_mu 
+//                    << ", Base_BW=" << m_base_gcc_bandwidth << " bps, Scaled_BW=" << scaled_bandwidth << " bps");
+        
+//     } catch (const std::exception& e) {
+//         std::cerr << "[ERROR] Exception in ApplyBandwidthScalingToController: " << e.what() << std::endl;
+//     } catch (...) {
+//         std::cerr << "[ERROR] Unknown exception in ApplyBandwidthScalingToController" << std::endl;
+//     }
+// }
+
+
+//==================== Apply Bandwidth Scaling via BitrateConstraints (方案B) =====================
+void WebrtcSender::ApplyBandwidthScalingToController() {
+    if (!m_call) {
+        NS_LOG_WARN("ApplyBandwidthScalingToController: m_call is null");
+        return;
     }
 
-    double current_mu = GetCurrentBandwidthScaleFactor();
-    uint32_t gcc_bandwidth = m_call->last_bandwidth_bps();
-    
-    // 如果GCC还没有估计出带宽，使用默认值
-    if (gcc_bandwidth == 0) {
-        gcc_bandwidth = 2500000; // 默认2.5 Mbps
-        std::cout << "[WARNING] GCC bandwidth is 0, using default 2.5 Mbps" << std::endl;
+    // 1. 基准：当前 GCC 估计带宽
+    uint32_t gcc_bw = m_call->last_bandwidth_bps();
+    if (gcc_bw == 0) {
+        // GCC 还没估出带宽时，用一个温和默认值
+        gcc_bw = 300000;  // 300 kbps
+        std::cout << "[WARNING] GCC bandwidth is 0, using default 300 kbps" << std::endl;
     }
-    
-    // ========== OSCC修复：避免累积效应 ==========
-    // 问题：如果直接用 last_bandwidth_bps() * current_mu，会导致累积：
-    //   第一次：3M * 1.05 = 3.15M → 设置为 max_bitrate
-    //   第二次：3.15M * 1.1 = 3.465M（错误！应该是 3M * 1.1 = 3.3M）
-    // 解决：保存"基准带宽"，每次都用 基准带宽 * current_mu
-    
-    // 如果还没有基准带宽，或者这是首次调速（μ=1），保存当前值为基准
-    if (m_base_gcc_bandwidth == 0 || (current_mu == 1.0 && m_last_applied_mu == 1.0)) {
-        m_base_gcc_bandwidth = gcc_bandwidth;
-        std::cout << "[OSCC-FIX] Base GCC bandwidth set to: " << (m_base_gcc_bandwidth / 1000000.0) << " Mbps" << std::endl;
-    } else if (m_last_applied_mu != 1.0 && current_mu != m_last_applied_mu) {
-        // 如果上次应用的μ不是1，需要还原：base = last_bandwidth / last_mu
-        // 但这可能会有误差累积，更好的方法是检测到GCC带宽大幅下降时重置基准
-        uint32_t estimated_base = static_cast<uint32_t>(gcc_bandwidth / m_last_applied_mu);
-        
-        // 只有当GCC带宽明显下降时（可能是网络变化），才更新基准
-        if (gcc_bandwidth < m_base_gcc_bandwidth * 0.5) {
-            // GCC带宽大幅下降，可能是网络拥塞，重置基准
-            m_base_gcc_bandwidth = estimated_base;
-            std::cout << "[OSCC-FIX] Base bandwidth reset due to congestion: " << (m_base_gcc_bandwidth / 1000000.0) << " Mbps" << std::endl;
-        }
-    }
-    
-    // 使用基准带宽计算缩放后的带宽
-    uint32_t scaled_bandwidth = static_cast<uint32_t>(m_base_gcc_bandwidth * current_mu);
-    
-    // 保存本次应用的μ值
-    m_last_applied_mu = current_mu;
-    
-    // ========== 方案A：通过BitrateConstraints限制WebRTC内部的发送带宽 ==========
-    webrtc::BitrateConstraints constraints;
-    constraints.min_bitrate_bps = 50000;  // 50 kbps
-    constraints.start_bitrate_bps = scaled_bandwidth;
-    constraints.max_bitrate_bps = scaled_bandwidth;
-    
-    try {
-        transport_controller->SetSdpBitrateParameters(constraints);
-        
-        std::cout << "=== WebrtcSender: BitrateConstraints Applied (方案A) ===" << std::endl;
-        std::cout << "Time: " << Simulator::Now().GetSeconds() << "s" << std::endl;
-        std::cout << "Base GCC Bandwidth: " << (m_base_gcc_bandwidth / 1000000.0) << " Mbps" << std::endl;
-        std::cout << "Current GCC reported: " << (gcc_bandwidth / 1000000.0) << " Mbps" << std::endl;
-        std::cout << "Bandwidth scale factor μ: " << current_mu << std::endl;
-        std::cout << "Scaled Bandwidth (max_bitrate): " << (scaled_bandwidth / 1000000.0) << " Mbps" << std::endl;
-        std::cout << "=====================================================" << std::endl;
-        
-        NS_LOG_INFO("WebrtcSender: BitrateConstraints applied - μ=" << current_mu 
-                   << ", Base_BW=" << m_base_gcc_bandwidth << " bps, Scaled_BW=" << scaled_bandwidth << " bps");
-        
-    } catch (const std::exception& e) {
-        std::cerr << "[ERROR] Exception in ApplyBandwidthScalingToController: " << e.what() << std::endl;
-    } catch (...) {
-        std::cerr << "[ERROR] Unknown exception in ApplyBandwidthScalingToController" << std::endl;
-    }
+
+    // 2. 当前 μ（再裁剪一次，防御）
+    double mu = m_bandwidth_scale_factor;
+    if (mu < 0.5) mu = 0.5;
+    if (mu > 1.5) mu = 1.5;
+
+    // 3. HRCC 一样：target_bw = gcc_bw * μ
+    uint32_t target_bw = static_cast<uint32_t>(gcc_bw * mu);
+
+    NS_LOG_INFO("ApplyBandwidthScalingToController: gcc_bw=" << gcc_bw
+                 << " mu=" << mu
+                 << " target_bw=" << target_bw);
+
+    // 4. 把目标码率交给已有的 SetTargetBitrate（里面有去抖和真正的 BitrateConstraints 更新）
+    SetTargetBitrate(target_bw);
 }
 
 // ==================== 网络和包处理 ====================
@@ -837,12 +874,25 @@ void WebrtcSender::ApplyRealBandwidthScaling(uint32_t target_bandwidth_bps) {
     }
 
     try {
+
+
+        // webrtc::BitrateConstraints constraints;
+        // constraints.min_bitrate_bps = std::max<uint32_t>(10000, target_bandwidth_bps / 10); // small floor
+        // constraints.start_bitrate_bps = target_bandwidth_bps;
+        // constraints.max_bitrate_bps = target_bandwidth_bps;
         // Build BitrateConstraints with target as min/start/max to strictly bound pacer
         webrtc::BitrateConstraints constraints;
-        constraints.min_bitrate_bps = std::max<uint32_t>(10000, target_bandwidth_bps / 10); // small floor
-        constraints.start_bitrate_bps = target_bandwidth_bps;
-        constraints.max_bitrate_bps = target_bandwidth_bps;
 
+        // 下界只做一个很小的 floor
+        constraints.min_bitrate_bps = std::max<uint32_t>(10000, target_bandwidth_bps / 10);
+        
+        // start 由 HRCC 给出的 target_bw 决定
+        constraints.start_bitrate_bps = target_bandwidth_bps;
+        
+        // max 给一个固定的硬上限，不再锁死成 target
+        const uint32_t kHardCap = 10000000;  // 10 Mbps，可按 trace 调整
+        constraints.max_bitrate_bps = kHardCap;
+        
         transport_controller->SetSdpBitrateParameters(constraints);
 
         NS_LOG_INFO("Applied real bandwidth scaling to transport controller: " << target_bandwidth_bps);

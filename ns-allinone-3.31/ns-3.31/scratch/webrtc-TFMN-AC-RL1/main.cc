@@ -10,6 +10,14 @@
 #include "simulation.h"
 #include "ns3/log.h"
 
+
+// #include "qoe_manager.cc"
+// #include "rl_state_manager.cc"
+// #include "network_components.cc"
+// #include "ai_mu_learner.cc"
+// #include "webrtc_trace.cc"
+// #include "simulation.cc"
+
 using namespace oscc;
 using namespace ns3;
 

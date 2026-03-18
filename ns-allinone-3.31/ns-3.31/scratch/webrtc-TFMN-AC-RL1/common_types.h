@@ -152,7 +152,7 @@ struct MuExperience {
 struct MuLearnerConfig {
     double mu_min = 0.5;
     double mu_max = 1.5;
-    double rt_max = 5.0; //20.0;
+    double rt_max = 10.0; //20.0;
     double loss_max = 0.1;
     double learning_rate = 0.01;
     double baseline_decay = 0.95;

@@ -48,7 +48,7 @@ _W_DELAY = 10.0
 _W_LOSS = 10.0
 _W_MDDL = 10.0
 
-_RT_MAX = 5.0
+_RT_MAX = 10.0
 _LOSS_MAX = 0.1
 
 _CSV_HEADER = [
@@ -94,7 +94,7 @@ class StepLoggerCallback(BaseCallback):
         reward = float(rewards[0])
         actions = self.locals.get("actions", np.array([[1.0]]))
         action_mu_raw = float(actions[0][0])
-        mu_min, mu_max = 0.8, 1.2
+        mu_min, mu_max = 1, 1
         mu_mid = (mu_min + mu_max) / 2.0    # 1.0
         mu_half = (mu_max - mu_min) / 2.0   # 0.2
         action_mu = mu_mid + mu_half * np.tanh(action_mu_raw)
