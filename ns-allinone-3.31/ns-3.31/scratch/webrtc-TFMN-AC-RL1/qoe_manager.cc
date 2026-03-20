@@ -53,6 +53,7 @@ void QoEIntegrationManager::OnPacketReceived(const FramePacketInfo& info, const 
     // 实际观测丢包率（来自 seq 号差值的滑动窗口，P1）
     double observed_loss = GetObservedLossRate();
 
+    //每次收到一个包，都要更新网络状态，统计延时、丢包率、RTT（此处延时和loss是真实的，RTT是trace）
     rl_manager_->UpdateNetworkState(delay_ms, observed_loss, MilliSeconds(trace_rtt));
 
     // GCC 估计带宽（用于奖励分子）
@@ -68,7 +69,12 @@ void QoEIntegrationManager::OnPacketReceived(const FramePacketInfo& info, const 
     bool mu_changed = false;
 
     // 使用MuLearner (Gym-based)，RL 状态用观测丢包（P1）
-    if (use_learner_ && mu_learner_) {
+    // Act() 仅在 (frame_id, Rt) 发生变化时调用一次，组内所有包共用同一 mu
+    bool is_new_group = !has_active_group_ ||
+                        (info.frame_id != current_group_frame_id_) ||
+                        (Rt != current_group_Rt_);
+
+    if (is_new_group && use_learner_ && mu_learner_) {
         MuState state(static_cast<double>(Rt), observed_loss);
         MuAction action = mu_learner_->Act(state);
         double learner_mu = action.mu;
@@ -81,6 +87,9 @@ void QoEIntegrationManager::OnPacketReceived(const FramePacketInfo& info, const 
 
             NS_LOG_DEBUG("MuLearner: Applied mu=" << mu << " for Rt=" << Rt << ", loss=" << observed_loss);
         }
+        current_group_frame_id_ = info.frame_id;
+        current_group_Rt_ = Rt;
+        has_active_group_ = true;
     }
 
     // 计算奖励：gcc_bw 做分子、real_trace_bw 做分母（P3）
@@ -89,9 +98,10 @@ void QoEIntegrationManager::OnPacketReceived(const FramePacketInfo& info, const 
         ? frame_stats.packets_received - 1
         : 0;
 
+    //统计错过截止时间惩罚，此处逻辑为，收到包时，若当前时间大于截止时间，则计算错过时间差
     double miss_deadline_time = 0.0;
     if (now > frame_stats.playout_deadline) {
-        miss_deadline_time = (now - frame_stats.playout_deadline).GetSeconds();
+        miss_deadline_time = (now - frame_stats.playout_deadline).GetMilliSeconds();
     }
 
     double out_U = 0.0, out_p_delay = 0.0, out_p_loss = 0.0, out_p_mddl = 0.0;
@@ -100,6 +110,7 @@ void QoEIntegrationManager::OnPacketReceived(const FramePacketInfo& info, const 
         miss_deadline_time, Rt, rl_manager_->GetLastPacketRt(),
         info.frame_id, packet_idx,
         &out_U, &out_p_delay, &out_p_loss, &out_p_mddl);
+        std::cout << "错过截止时间: " << miss_deadline_time << std::endl;
 
     double bw_util;
     if ((gcc_bw * mu) > real_trace_bw) {
@@ -202,6 +213,10 @@ void QoEIntegrationManager::ReportPacketSeq(uint32_t seq) {
 
 double QoEIntegrationManager::GetObservedLossRate() const {
     if (window_expected_ == 0) return 0.0;
+    std::cout << "计算丢包率: " 
+              << "，窗口内received: " << window_received_ 
+              << "，窗口内expected: " << window_expected_ << std::endl
+              << "，丢包率: " << 1.0 - static_cast<double>(window_received_) / window_expected_ << std::endl;
     return 1.0 - static_cast<double>(window_received_) / window_expected_;
 }
 

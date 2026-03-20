@@ -159,6 +159,11 @@ private:
     IMuLearner* mu_learner_;
     bool use_learner_;
 
+    // 组级 mu 管理：追踪当前 (frame_id, Rt) 组，确保组内所有包共用同一 mu
+    uint32_t current_group_frame_id_ = 0;
+    uint32_t current_group_Rt_ = 0;
+    bool has_active_group_ = false;
+
     // Mu trace and per-frame QoE output
     std::vector<MuChangeRecord> mu_change_records_;
     std::map<uint32_t, FrameAccumulator> frame_accumulator_;
