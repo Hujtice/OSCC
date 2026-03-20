@@ -2,6 +2,7 @@
 #include "ns3/log.h"
 #include "ns3/simulator.h"
 #include <algorithm>
+#include <cmath>
 #include <iomanip>
 
 namespace oscc {
@@ -69,16 +70,16 @@ uint32_t RLStateManager::CalculateTransmissionOpportunities(Time current_time, T
     // NS_LOG_DEBUG("  RTT: " << current_rtt_.GetSeconds() << "s");
     // NS_LOG_DEBUG("  Rt: " << Rt);
     
-    std::cout << "计算传输机会："
-              << "当前时间: " << current_time.GetSeconds() << "s" << std::endl
-              << "截止时间: " << frame_deadline.GetSeconds() << "s" << std::endl
-              << "剩余时间: " << T_remain.GetSeconds() << "s" << std::endl
-              << "包大小: " << packet_size << " bytes" << std::endl
-              << "带宽: " << trace_bandwidth_bps << " bps" << std::endl
-              << "包发送时间: " << packet_send_time.GetSeconds() << "s" << std::endl
-              << "可用时间: " << available_time.GetSeconds() << "s" << std::endl
-              << "RTT的值: " << current_rtt_.GetSeconds() << "s" << std::endl
-              << "Rt的值: " << Rt << std::endl;
+    // std::cout << "计算传输机会："
+    //           << "当前时间: " << current_time.GetSeconds() << "s" << std::endl
+    //           << "截止时间: " << frame_deadline.GetSeconds() << "s" << std::endl
+    //           << "剩余时间: " << T_remain.GetSeconds() << "s" << std::endl
+    //           << "包大小: " << packet_size << " bytes" << std::endl
+    //           << "带宽: " << trace_bandwidth_bps << " bps" << std::endl
+    //           << "包发送时间: " << packet_send_time.GetSeconds() << "s" << std::endl
+    //           << "可用时间: " << available_time.GetSeconds() << "s" << std::endl
+    //           << "RTT的值: " << current_rtt_.GetSeconds() << "s" << std::endl
+    //           << "Rt的值: " << Rt << std::endl;
     
     return Rt;
 }
@@ -103,6 +104,7 @@ double RLStateManager::CalculateReward(double mu_prev, double gcc_bandwidth_bps,
     
     // (2) 延迟惩罚 - 使用实际延迟
     double p_delay = 0.0;
+    std::cout << "current_delay_ms: " << current_delay_ms << std::endl;
     if (current_delay_ms < 30.0) {
         p_delay = current_delay_ms / 200.0;
     } else if (current_delay_ms < 80) {
@@ -132,11 +134,13 @@ double RLStateManager::CalculateReward(double mu_prev, double gcc_bandwidth_bps,
     
     // (4) 错过截止时间惩罚
     double p_mddl = 0.0;
-    double rtt_seconds = current_rtt_.GetSeconds();
+    double rtt_milliseconds = current_rtt_.GetMilliSeconds();
     
     if (packet_index == 0) {
         if (Rt_current > 0) {
-            double denominator = (Rt_current - Rt_prev + 1) * rtt_seconds;
+            double denominator = (Rt_current - Rt_prev + 1) * rtt_milliseconds;
+            std::cout << "denominator: " << denominator << std::endl;
+            std::cout << "miss_deadline_time: " << miss_deadline_time << std::endl;
             if (denominator > 0.001) {
                 p_mddl = miss_deadline_time / denominator;
                 p_mddl = std::min(std::max(p_mddl, 0.0), 1.0);
@@ -145,7 +149,9 @@ double RLStateManager::CalculateReward(double mu_prev, double gcc_bandwidth_bps,
     } else {
         uint32_t Rt_frame_first = Rt_current + packet_index;
         if (Rt_frame_first > 0) {
-            double denominator = (Rt_frame_first - Rt_prev + 1) * rtt_seconds;
+            double denominator = (Rt_frame_first - Rt_prev + 1) * rtt_milliseconds;
+            std::cout << "denominator: " << denominator << std::endl;
+            std::cout << "miss_deadline_time: " << miss_deadline_time << std::endl;
             if (denominator > 0.001) {
                 p_mddl = miss_deadline_time / denominator;
                 p_mddl = std::min(std::max(p_mddl, 0.0), 1.0);
@@ -153,6 +159,12 @@ double RLStateManager::CalculateReward(double mu_prev, double gcc_bandwidth_bps,
         }
     }
 
+    std::cout << "带宽利用率: " << U << std::endl;
+    std::cout << "丢包率惩罚: " << p_loss << std::endl;
+    std::cout << "延迟惩罚: " << p_delay << std::endl;
+    std::cout << "错过截止时间惩罚: " << p_mddl << std::endl;
+
+    //待修改，根据Rt调整权重
     double U_weight = 2.5;
     double delay_weight = 10;
     double loss_weight = 10;
@@ -181,7 +193,8 @@ void RLStateManager::RecordPacketState(uint32_t frame_id, uint32_t packet_index,
                                        double p_loss, double p_mddl, double current_delay_ms,
                                        double miss_deadline_s,
                                        double real_throughput_bps, double gcc_bw_bps,
-                                       double trace_bw_bps, double scaled_bw_bps) {
+                                       double trace_bw_bps, double scaled_bw_bps,
+                                       uint32_t pkt_received, uint32_t pkt_expected) {
     PacketStateRecord record;
     record.frame_id = frame_id;
     record.packet_index = packet_index;
@@ -207,7 +220,8 @@ void RLStateManager::RecordPacketState(uint32_t frame_id, uint32_t packet_index,
     
     AddPacketToRtGroup(frame_id, packet_index, Rt, loss_rate, reward, send_time, mu_used,
                        bandwidth_utilization, p_delay, p_loss, p_mddl,
-                       current_delay_ms, loss_rate, miss_deadline_s, gcc_bw_bps, trace_bw_bps);
+                       current_delay_ms, loss_rate, miss_deadline_s, gcc_bw_bps, trace_bw_bps,
+                       pkt_received, pkt_expected);
     
     NS_LOG_INFO("Recorded REAL packet state: frame=" << frame_id << ", packet=" << packet_index
                << ", mu=" << mu_used << ", Rt=" << Rt << ", loss_rate=" << loss_rate 
@@ -220,9 +234,13 @@ void RLStateManager::AddPacketToRtGroup(uint32_t frame_id, uint32_t packet_index
                                         double loss_rate, double reward, Time send_time, double mu_used,
                                         double U, double p_delay, double p_loss, double p_mddl,
                                         double raw_delay_ms, double raw_loss_rate,
-                                        double raw_miss_deadline_s, double gcc_bw_bps, double trace_bw_bps) {
+                                        double raw_miss_deadline_s, double gcc_bw_bps, double trace_bw_bps,
+                                        uint32_t pkt_received, uint32_t pkt_expected) {
     if (current_rt_group_.frame_id != frame_id || current_rt_group_.Rt_value != Rt) {
         if (current_rt_group_.packet_count > 0) {
+            std::cout << "结束一个Rt组了" 
+                      << "当前frame_id: " << frame_id
+                      << "当前Rt: " << Rt << std::endl;
             FinalizeCurrentRtGroup();
         }
         
@@ -242,9 +260,14 @@ void RLStateManager::AddPacketToRtGroup(uint32_t frame_id, uint32_t packet_index
         current_rt_group_.sum_raw_miss_deadline_s = 0.0;
         current_rt_group_.sum_gcc_bw_bps = 0.0;
         current_rt_group_.sum_trace_bw_bps = 0.0;
+        current_rt_group_.group_received = 0;
+        current_rt_group_.group_expected = 0;
         current_rt_group_.start_time = send_time;
     }
     
+    current_rt_group_.group_received += pkt_received;
+    current_rt_group_.group_expected += pkt_expected;
+
     current_rt_group_.packet_count++;
     current_rt_group_.reward_sum += reward;
     current_rt_group_.sum_U += U;
@@ -261,8 +284,40 @@ void RLStateManager::AddPacketToRtGroup(uint32_t frame_id, uint32_t packet_index
 
 void RLStateManager::FinalizeCurrentRtGroup() {
     if (current_rt_group_.packet_count > 0) {
-        current_rt_group_.avg_reward = current_rt_group_.reward_sum / current_rt_group_.packet_count;
-        
+        double actual_loss = 0.0;
+        if (current_rt_group_.group_expected > 0) {
+            actual_loss = 1.0 - static_cast<double>(current_rt_group_.group_received)
+                              / static_cast<double>(current_rt_group_.group_expected);
+        }
+
+        double Ptget = 1.0 - max_loss_rate_;
+        uint32_t Rt_used = current_rt_group_.Rt_value;
+        double Ltol;
+        if (Rt_used == 0) {
+            Ltol = 0.01;
+        } else {
+            Ltol = std::pow(1.0 - Ptget, 1.0 / static_cast<double>(Rt_used));
+        }
+        double adaptive_tolerance = Ltol * (1.0 + 0.5 * (static_cast<double>(Rt_used) / 10.0));
+        double new_p_loss = std::min(actual_loss / adaptive_tolerance, 1.0);
+
+        double n = static_cast<double>(current_rt_group_.packet_count);
+        double avg_U = current_rt_group_.sum_U / n;
+        double avg_p_delay = current_rt_group_.sum_p_delay / n;
+        double avg_p_mddl = current_rt_group_.sum_p_mddl / n;
+
+        constexpr double U_weight = 2.5;
+        constexpr double delay_weight = 10.0;
+        constexpr double loss_weight = 10.0;
+        constexpr double mddl_weight = 10.0;
+
+        current_rt_group_.avg_reward = U_weight * avg_U
+                                     - delay_weight * avg_p_delay
+                                     - loss_weight * new_p_loss
+                                     - mddl_weight * avg_p_mddl;
+
+        current_rt_group_.loss_rate = actual_loss;
+
         RtGroupRewardRecord record(
             current_rt_group_.frame_id,
             current_rt_group_.Rt_value,
@@ -285,17 +340,16 @@ void RLStateManager::FinalizeCurrentRtGroup() {
         
         // MuLearner更新
         if (learner_enabled_ && mu_learner_) {
-            double n = static_cast<double>(current_rt_group_.packet_count);
             MuState state(static_cast<double>(current_rt_group_.Rt_value), current_rt_group_.loss_rate);
             MuAction action(current_rt_group_.mu_used);
             MuExperience exp(state, action, current_rt_group_.avg_reward, 
                             current_rt_group_.frame_id, current_rt_group_.Rt_value);
-            exp.U = current_rt_group_.sum_U / n;
-            exp.p_delay = current_rt_group_.sum_p_delay / n;
-            exp.p_loss = current_rt_group_.sum_p_loss / n;
-            exp.p_mddl = current_rt_group_.sum_p_mddl / n;
+            exp.U = avg_U;
+            exp.p_delay = avg_p_delay;
+            exp.p_loss = new_p_loss;
+            exp.p_mddl = avg_p_mddl;
             exp.raw_delay_ms = current_rt_group_.sum_raw_delay_ms / n;
-            exp.raw_loss_rate = current_rt_group_.sum_raw_loss_rate / n;
+            exp.raw_loss_rate = actual_loss;
             exp.raw_miss_deadline_s = current_rt_group_.sum_raw_miss_deadline_s / n;
             exp.gcc_bw_bps = current_rt_group_.sum_gcc_bw_bps / n;
             exp.trace_bw_bps = current_rt_group_.sum_trace_bw_bps / n;

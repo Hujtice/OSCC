@@ -132,7 +132,8 @@ void QoEIntegrationManager::OnPacketReceived(const FramePacketInfo& info, const 
                                    send_time, now, frame_stats.playout_deadline,
                                    bw_util, out_p_delay, out_p_loss, out_p_mddl, delay_ms,
                                    miss_deadline_time,
-                                   real_throughput_bps, gcc_bw, real_trace_bw, scaled_bw);
+                                   real_throughput_bps, gcc_bw, real_trace_bw, scaled_bw,
+                                   last_pkt_received_, last_pkt_expected_);
 
     // Mu trace: record when mu actually changed (for _mu_trace.csv)
     if (mu_changed) {
@@ -192,12 +193,17 @@ void QoEIntegrationManager::ReportPacketSeq(uint32_t seq) {
     if (first_packet_) {
         last_seq_ = seq;
         first_packet_ = false;
+        last_pkt_received_ = 1;
+        last_pkt_expected_ = 1;
         return;
     }
     uint32_t gap = seq - last_seq_;
     uint32_t lost = (gap > 1) ? (gap - 1) : 0;
     uint32_t received = 1;
     uint32_t expected = lost + received;
+
+    last_pkt_received_ = received;
+    last_pkt_expected_ = expected;
 
     window_received_ += received;
     window_expected_ += expected;

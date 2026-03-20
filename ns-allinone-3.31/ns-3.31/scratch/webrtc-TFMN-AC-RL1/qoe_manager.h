@@ -176,6 +176,10 @@ private:
     uint32_t window_received_ = 0;
     uint32_t window_expected_ = 0;
     std::deque<std::pair<uint32_t, uint32_t>> loss_window_;  // (received, expected)
+
+    // 最近一次 ReportPacketSeq 对应的 (received, expected)，供 Rt 组累计实际丢包
+    uint32_t last_pkt_received_ = 1;
+    uint32_t last_pkt_expected_ = 1;
 };
 
 } // namespace oscc

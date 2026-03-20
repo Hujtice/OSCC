@@ -39,14 +39,16 @@ public:
                           double p_loss, double p_mddl, double current_delay_ms,
                           double miss_deadline_s,
                           double real_throughput_bps, double gcc_bw_bps,
-                          double trace_bw_bps, double scaled_bw_bps);
+                          double trace_bw_bps, double scaled_bw_bps,
+                          uint32_t pkt_received, uint32_t pkt_expected);
     
     // Rt分组管理
     void AddPacketToRtGroup(uint32_t frame_id, uint32_t packet_index, uint32_t Rt, 
                            double loss_rate, double reward, Time send_time, double mu_used,
                            double U, double p_delay, double p_loss, double p_mddl,
                            double raw_delay_ms, double raw_loss_rate,
-                           double raw_miss_deadline_s, double gcc_bw_bps, double trace_bw_bps);
+                           double raw_miss_deadline_s, double gcc_bw_bps, double trace_bw_bps,
+                           uint32_t pkt_received, uint32_t pkt_expected);
     void FinalizeCurrentRtGroup();
     const std::vector<RtGroupRewardRecord>& GetRtGroupRecords() const { return rt_group_records_; }
     
@@ -102,13 +104,16 @@ private:
         double sum_raw_miss_deadline_s;
         double sum_gcc_bw_bps;
         double sum_trace_bw_bps;
+        uint32_t group_received;
+        uint32_t group_expected;
         
         RtGroup() : frame_id(0), Rt_value(0), loss_rate(0.0), mu_used(1.0),
                    avg_reward(0.0), packet_count(0), reward_sum(0.0), 
                    start_time(Seconds(0)), end_time(Seconds(0)),
                    sum_U(0.0), sum_p_delay(0.0), sum_p_loss(0.0), sum_p_mddl(0.0),
                    sum_raw_delay_ms(0.0), sum_raw_loss_rate(0.0),
-                   sum_raw_miss_deadline_s(0.0), sum_gcc_bw_bps(0.0), sum_trace_bw_bps(0.0) {}
+                   sum_raw_miss_deadline_s(0.0), sum_gcc_bw_bps(0.0), sum_trace_bw_bps(0.0),
+                   group_received(0), group_expected(0) {}
     };
     
     double current_mu_;
