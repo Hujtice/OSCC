@@ -84,7 +84,7 @@ uint32_t RLStateManager::CalculateTransmissionOpportunities(Time current_time, T
     return Rt;
 }
 
-double RLStateManager::CalculateReward(double mu_prev, double gcc_bandwidth_bps, double trace_bandwidth_bps,
+double RLStateManager::CalculateReward(double real_throughput_bps, double trace_bandwidth_bps,
                                        double current_delay_ms, double current_loss_rate, 
                                        double miss_deadline_time, uint32_t Rt_current, uint32_t Rt_prev,
                                        uint32_t frame_id, uint32_t packet_index,
@@ -98,8 +98,8 @@ double RLStateManager::CalculateReward(double mu_prev, double gcc_bandwidth_bps,
         Rt_used = last_packet_Rt_;
     }
 
-    // (1) 带宽利用率 U
-    double U = (mu_prev * gcc_bandwidth_bps) / trace_bandwidth_bps;
+    // (1) 带宽利用率 U — 接收端实测吞吐量 / 真实链路带宽
+    double U = (trace_bandwidth_bps > 0.0) ? (real_throughput_bps / trace_bandwidth_bps) : 0.0;
     U = std::min(std::max(U, 0.0), 1.0);
     
     // (2) 延迟惩罚 - 使用实际延迟
@@ -180,7 +180,7 @@ double RLStateManager::CalculateReward(double mu_prev, double gcc_bandwidth_bps,
     if (out_p_loss) *out_p_loss = p_loss;
     if (out_p_mddl) *out_p_mddl = p_mddl;
 
-    NS_LOG_DEBUG("Rt_used: " << Rt_used << ", mu_prev: " << mu_prev << ", U: " << U);
+    NS_LOG_DEBUG("Rt_used: " << Rt_used << ", real_throughput: " << real_throughput_bps << ", U: " << U);
     NS_LOG_DEBUG("p_delay: " << p_delay << ", p_loss: " << p_loss << ", p_mddl: " << p_mddl);
     
     return reward;

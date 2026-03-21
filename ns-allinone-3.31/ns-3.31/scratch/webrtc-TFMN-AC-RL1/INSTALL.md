@@ -147,10 +147,15 @@ ipcrm -M 1234 2>/dev/null   # 删除 key=1234 的共享内存段（默认 SHM_KE
 
 **说明**：当前默认单流，shm_id=1234。若仿真中创建多个 AiMuLearner（1234, 1235, ...），需多进程或多 env 对应多个 shm_id，或仅使用第一个流进行训练。
 
+## 训练步数与 C++ 语义（简要）
+
+- Python 每收到一次 `step` 对应 ns-3 一次 `Act()`；当前实现为 **每个新 Rt 组 (frame_id, Rt)** 才调用一次 `Act()`，故 `timesteps` 与「组数」更接近。
+- 详见 [project_map.md](project_map.md) 中「Rt 组级 RL 设计」。
+
 ## 下一步
 
 - [README.md](README.md) - 项目概述  
-- [claude.md](claude.md) - 完整技术文档与数据流  
+- [project_map.md](project_map.md) - 完整技术文档与数据流  
 - [gym_agent/README.md](gym_agent/README.md) - Python 端参数与用法  
 
 监控训练：`tensorboard --logdir gym_agent/logs`，访问 http://localhost:6006 。

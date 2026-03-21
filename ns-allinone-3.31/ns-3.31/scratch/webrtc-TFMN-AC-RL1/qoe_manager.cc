@@ -60,7 +60,7 @@ void QoEIntegrationManager::OnPacketReceived(const FramePacketInfo& info, const 
     double gcc_bw = GetNearestGccBandwidth(now);
     if (gcc_bw <= 0) gcc_bw = real_trace_bw * 0.7;
 
-    // Rt 用真实链路带宽计算（P2）
+    // Rt 用真实链路带宽计算
     uint32_t Rt = rl_manager_->CalculateTransmissionOpportunities(
         now, frame_stats.playout_deadline, info.packet_size, real_trace_bw);
 
@@ -104,28 +104,25 @@ void QoEIntegrationManager::OnPacketReceived(const FramePacketInfo& info, const 
         miss_deadline_time = (now - frame_stats.playout_deadline).GetMilliSeconds();
     }
 
-    double out_U = 0.0, out_p_delay = 0.0, out_p_loss = 0.0, out_p_mddl = 0.0;
-    double reward = rl_manager_->CalculateReward(
-        mu, gcc_bw, real_trace_bw, delay_ms, observed_loss,
-        miss_deadline_time, Rt, rl_manager_->GetLastPacketRt(),
-        info.frame_id, packet_idx,
-        &out_U, &out_p_delay, &out_p_loss, &out_p_mddl);
-        std::cout << "错过截止时间: " << miss_deadline_time << std::endl;
-
-    double bw_util;
-    if ((gcc_bw * mu) > real_trace_bw) {
-        bw_util = 1.0;
-    } else {
-        bw_util = (gcc_bw * mu) / real_trace_bw;
-    }
-
-    // 接收端真实吞吐量：滑动窗口内 sum(bytes)*8 / window_seconds
+    // 接收端真实吞吐量（必须在 CalculateReward 之前计算）
     throughput_window_.push_back(std::make_pair(now, info.packet_size));
     Time window_end = now - Seconds(kThroughputWindowSeconds);
     while (!throughput_window_.empty() && throughput_window_.front().first < window_end) {
         throughput_window_.pop_front();
     }
     double real_throughput_bps = ComputeRealThroughputBps(now);
+
+    double out_U = 0.0, out_p_delay = 0.0, out_p_loss = 0.0, out_p_mddl = 0.0;
+    double reward = rl_manager_->CalculateReward(
+        real_throughput_bps, real_trace_bw, delay_ms, observed_loss,
+        miss_deadline_time, Rt, rl_manager_->GetLastPacketRt(),
+        info.frame_id, packet_idx,
+        &out_U, &out_p_delay, &out_p_loss, &out_p_mddl);
+    std::cout << "错过截止时间: " << miss_deadline_time << std::endl;
+
+    double bw_util = (real_trace_bw > 0.0)
+        ? std::min(real_throughput_bps / real_trace_bw, 1.0)
+        : 0.0;
     double scaled_bw = mu * gcc_bw;
 
     rl_manager_->RecordPacketState(info.frame_id, packet_idx, mu, Rt, observed_loss, reward,

@@ -49,7 +49,8 @@ python3 train.py --load-model ./models/PPO_webrtc_mu_xxx_final.zip
 
 - **Observation**: Box(shape=(2,), low=0, high=1) — [norm_Rt, norm_loss]
 - **Action**: Box(shape=(1,), low=0.5, high=1.5) — [μ]
-- **Reward**: QoE 综合指标（带宽利用率、延迟/丢包/截止时间惩罚）
+- **Reward**: C++ 在上一 **Rt 组**结束时写入 ShmEnv；组级 QoE（`norm_loss` 为滑窗，reward 中丢包项用该组 **seq 累计实际丢包率** 重算，与逐包日志可能不一致）
+- **步频说明**: ns-3 仅在每个 **新 (frame_id, Rt) 组** 调用一次 `Act()`，因此 SB3 的 `timesteps` 更接近「Rt 组数」而非「应用层包数」
 
 ## 监控
 

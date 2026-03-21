@@ -8,11 +8,20 @@
 
 **命名空间**: 所有 C++ 代码在 `namespace oscc` 中。
 
+## Rt 组级 RL 设计（重要）
+
+同一 **(frame_id, Rt)** 视为一个 **Rt 组**：
+
+1. **组内统一 μ**：`QoEIntegrationManager` 仅在进入新 Rt 组时调用一次 `mu_learner_->Act()`；组内后续包复用 `RLStateManager::GetCurrentMu()`，不再每包请求 Python。Python 侧 **一步 env step ≈ 一个 Rt 组**（而非每个应用层包）。
+2. **观测 loss（滑窗）**：`MuState.loss` / `ShmEnv.norm_loss` 仍来自 **50 包 seq 滑窗** `GetObservedLossRate()`（`ReportPacketSeq` 维护），用于动作选择时的状态。
+3. **组级 reward 的丢包项**：`FinalizeCurrentRtGroup()` 中不再对逐包 `p_loss` 取平均；改为累加组内各包对应的 seq 统计 `(received, expected)`（由 `ReportPacketSeq` 写入 `last_pkt_received_/last_pkt_expected_`，经 `RecordPacketState` 传入），计算 **组实际丢包率** `actual_loss = 1 - sum_received/sum_expected`，用其与 `CalculateReward` 相同的 `Ltol`/`adaptive_tolerance` 公式重算 `new_p_loss`，再与组内平均的 `U、p_delay、p_mddl` 合成 **组级 avg_reward**，供 `Observe()` 与 `*_Frame-Rt-Reward.csv` 的 `loss_rate` 字段。
+4. **包级 CSV**（`*_RL_log.csv`）：仍为每包一条记录，`reward`/`loss_rate` 为当时滑窗下的逐包 `CalculateReward` 结果，便于诊断；与送给 learner 的组级 reward 可能不一致。
+
 ## 文件结构与职责
 
 ```
 webrtc-TFMN-AC-RL1/
-├── claude.md               # [本文件] 项目地图
+├── project_map.md          # [本文件] 项目地图
 ├── README.md               # 用户级项目概述
 ├── INSTALL.md              # 详细安装指南（含故障排除）
 │
@@ -92,8 +101,8 @@ struct RtGroupRewardRecord { frame_id, Rt_value, loss_rate, mu_used, avg_reward,
 // 完整 RL 状态
 struct RLState { mu, reward, bandwidth_utilization, p_delay, p_loss, p_mddl, ... };
 
-// ns3-ai 共享内存结构（与 Python ctypes 对齐）
-struct ShmEnv { float norm_rt; float norm_loss; float reward; uint8_t done; };
+// ns3-ai 共享内存结构（与 Python ctypes 对齐，详见 common_types.h）
+// ShmEnv 含 norm_rt, norm_loss, reward, U, p_delay, p_loss, p_mddl, raw_*, gcc/trace_bw, frame_id, done 等
 struct ShmAction { float mu; };
 ```
 
@@ -139,21 +148,24 @@ available_time = T_remain - packet_send_time
 Rt = floor(available_time / RTT)
 ```
 
-**(b) 奖励函数** (`CalculateReward`):
+**(b) 奖励函数** (`CalculateReward`，**包级**日志用):
 ```
 reward = 2.5 * U - 10 * p_delay - 10 * p_loss - 10 * p_mddl
 
 其中:
-  U = clamp(mu_prev * gcc_bw / trace_bw, 0, 1)           -- 带宽利用率
+  U = clamp(real_throughput_bps / trace_bw, 0, 1)         -- 带宽利用率（接收端实测吞吐 / 真实链路带宽）
   p_delay: 分段函数(delay_ms), 受 Rt 敏感度加权          -- 延迟惩罚
-  p_loss = loss_rate / adaptive_tolerance(Rt, Lmax)       -- 丢包惩罚
+  p_loss = loss_rate / adaptive_tolerance(Rt, Lmax)       -- 丢包惩罚（此处 loss_rate 为当时滑窗 observed_loss）
   p_mddl = miss_deadline_time / ((ΔRt+1) * RTT)          -- 错过截止时间惩罚
 ```
 
-**Rt 分组管理**: 每当 (frame_id, Rt) 变化时，FinalizeCurrentRtGroup() 会：
-1. 计算组内平均奖励
-2. 调用 `mu_learner_->Observe(exp)` 将经验发送给 Python（AiMuLearner 更新 last_reward_）
-3. 调用 `mu_learner_->MaybeUpdate()`
+> **注**：`real_throughput_bps` 是 QoEIntegrationManager 中 0.5s 滑窗内接收字节×8/窗口秒数；Rt 计算也使用 `real_trace_bw`（trace 文件带宽）。
+
+**Rt 分组管理**: 每当 (frame_id, Rt) 变化时，`FinalizeCurrentRtGroup()` 会：
+1. 用组内累计的 seq `group_received` / `group_expected` 计算 **actual_loss**，重算 **new_p_loss** 与 **组级 avg_reward**（权重与上式一致：2.5 / 10 / 10 / 10）
+2. 将 `loss_rate` 更新为 **actual_loss**，写入 `RtGroupRewardRecord` 与 `MuExperience`（`exp.p_loss = new_p_loss`，`exp.raw_loss_rate = actual_loss`）
+3. 调用 `mu_learner_->Observe(exp)`（AiMuLearner 更新 last_reward_）
+4. 调用 `mu_learner_->MaybeUpdate()`
 
 **⚠️ 已知问题**: `OutputLearnerLog()` 中仍引用了 `BanditMuLearner` 和 `TorchMLPMuLearner`（已移除的旧组件），会导致编译错误，需要清理。
 
@@ -163,15 +175,17 @@ reward = 2.5 * U - 10 * p_delay - 10 * p_loss - 10 * p_mddl
 
 **OnPacketReceived(FramePacketInfo, FrameStatistics) 实际流程**:
 1. 计算实际延迟 delay_ms
-2. 从 BandwidthChanger 获取 trace 网络信息（loss, RTT）
-3. 更新 RLStateManager 网络状态
-4. 获取平滑 GCC 带宽（滑动窗口 size=5）
+2. 从 BandwidthChanger 获取 trace 网络信息（带宽、RTT 等）
+3. `GetObservedLossRate()`（50 包 seq 滑窗）→ 更新 RLStateManager 网络状态
+4. `GetNearestGccBandwidth(now)` 获取 GCC 估计带宽（带宽历史由 OnBW 等维护）
 5. 计算 Rt（调用 RLStateManager）
-6. **若启用 MuLearner**: 调用 `mu_learner_->Act(MuState{Rt, loss})`（AiMuLearner 写 ShmEnv、读 ShmAction）获取 mu 并应用
-7. 计算 reward（调用 RLStateManager.CalculateReward）
-8. 记录包状态（触发 Rt 分组管理，间接调用 Observe 发送经验给 Python）
+6. **若启用 MuLearner 且 (frame_id, Rt) 为新组**: 调用一次 `mu_learner_->Act(MuState{Rt, observed_loss})`；同组后续包不调用 Act，沿用 `GetCurrentMu()`
+7. 计算**包级** reward（`CalculateReward`，loss 为当时滑窗 observed_loss）
+8. `RecordPacketState(..., last_pkt_received_, last_pkt_expected_)`：触发 Rt 分组累加 seq 统计，组切换时 `FinalizeCurrentRtGroup`
 
-**注意**: Observe 不在此方法中直接调用，而是通过 RecordPacketState → AddPacketToRtGroup → FinalizeCurrentRtGroup 链式触发。
+**关联**: `FrameAwareWebrtcTrace::OnReceiptPktInfo` 先于帧级回调调用 `ReportPacketSeq(seq)`，更新滑窗并设置 `last_pkt_received_` / `last_pkt_expected_`。
+
+**注意**: `Observe` 不在此方法中直接调用，而是通过 RecordPacketState → AddPacketToRtGroup → FinalizeCurrentRtGroup 链式触发。
 
 ### 5. BandwidthChanger & TriggerRandomLoss (network_components.h/cc)
 
@@ -183,7 +197,7 @@ reward = 2.5 * U - 10 * p_delay - 10 * p_loss - 10 * p_mddl
 
 继承自 `ns3::WebrtcTrace`（基类在 ex-webrtc-module 中）。
 
-**职责**: 拦截 GCC 带宽回调 (`OnBW`)，乘以 μ 得到 scaled 带宽，记录到 QoEIntegrationManager 的带宽历史中。输出带宽统计 CSV（10列：timestamp, trace_bw, gcc_bw, scaled_bw, mu 等）。
+**职责**: 拦截 GCC 带宽回调 (`OnBW`)，乘以 μ 得到 scaled 带宽，记录到 QoEIntegrationManager 的带宽历史中。`OnReceiptPktInfo` 中调用 `qoe_manager_->ReportPacketSeq(seq)`，驱动 50 包滑窗与 `last_pkt_*` 供 Rt 组统计。输出带宽统计 CSV（10列：timestamp, trace_bw, gcc_bw, scaled_bw, mu 等）。
 
 ### 7. simulation.cc — 仿真编排
 
@@ -215,11 +229,11 @@ Trace File ──→ BandwidthChanger ──→ P2P Link (带宽切换)         
                     │     │ 更新 QoEManager 带宽历史                                │
                     │     ↓                                                        │
                     │   QoEIntegrationManager.OnPacketReceived()                   │
-                    │     │ ① 计算 delay, 获取 trace 网络状态                       │
+                    │     │ ① 计算 delay, 滑窗 observed_loss, 更新网络状态          │
                     │     │ ② 计算 Rt                                              │
-                    │     │ ③ AiMuLearner.Act({Rt,loss}) → 写 ShmEnv, 读 ShmAction  │
-                    │     │ ④ 计算 reward                                           │
-                    │     │ ⑤ RecordPacketState → Rt分组 → Observe(reward)          │
+                    │     │ ③ 新 Rt 组时 Act({Rt,loss})；同组复用 mu               │
+                    │     │ ④ 包级 CalculateReward（日志用）                       │
+                    │     │ ⑤ RecordPacketState(seq累计) → 组末重算 reward → Observe │
                     │     ↓                          ↕ 共享内存 (ns3-ai)           │
                     └────────────────────────────────┼─────────────────────────────┘
                                                      │
@@ -269,7 +283,7 @@ Trace File ──→ BandwidthChanger ──→ P2P Link (带宽切换)         
 | 文件名模式 | 内容 |
 |-----------|------|
 | `*_RL_log.csv` | 包级 RL 状态（frame_id, Rt, mu, reward, delay 等14列） |
-| `*_Frame-Rt-Reward.csv` | Rt 分组奖励（frame_id, Rt, mu, avg_reward 等8列） |
+| `*_Frame-Rt-Reward.csv` | Rt 分组（avg_reward 为组级重算；loss_rate 为组 seq 实际丢包率） |
 | `*_bandwidth_statistics.csv` | 带宽统计（trace_bw, gcc_bw, scaled_bw, mu 等10列） |
 | `*_bandwidth_history.csv` | 带宽变化历史 |
 | `*_learner_state.csv` | 学习器最终状态 |
