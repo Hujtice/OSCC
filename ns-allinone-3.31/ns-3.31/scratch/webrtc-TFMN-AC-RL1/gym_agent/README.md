@@ -1,6 +1,6 @@
 # WebRTC MU Learning - Python Agent (ns3-ai)
 
-Python 端强化学习智能体，通过 **ns3-ai 共享内存** 与 ns-3 仿真交互，优化 WebRTC 带宽缩放因子 μ。
+Python 端强化学习智能体，通过 **ns3-ai 共享内存** 与 ns-3 仿真交互，优化 WebRTC 带宽缩放因子 μ∈{0.8, 0.9, 1.0, 1.1, 1.2}（离散 5 值）。
 
 ## 依赖
 
@@ -31,7 +31,7 @@ python3 train.py --algorithm PPO --timesteps 100000
 
 ### 训练参数
 
-- `--algorithm`: 算法 (PPO, SAC, TD3)，默认 PPO
+- `--algorithm`: 算法 (PPO 推荐；SAC/TD3 不兼容离散动作，选择时报错)，默认 PPO
 - `--timesteps`: 总步数，默认 100000
 - `--shm-id`: 共享内存块 id，需与 ns-3 AiMuLearner 一致，默认 1234
 - `--model-dir`: 模型保存目录，默认 ./models
@@ -47,10 +47,11 @@ python3 train.py --load-model ./models/PPO_webrtc_mu_xxx_final.zip
 
 ## 环境规格
 
-- **Observation**: Box(shape=(2,), low=0, high=1) — [norm_Rt, norm_loss]
-- **Action**: Box(shape=(1,), low=0.5, high=1.5) — [μ]
-- **Reward**: C++ 在上一 **Rt 组**结束时写入 ShmEnv；组级 QoE（`norm_loss` 为滑窗，reward 中丢包项用该组 **seq 累计实际丢包率** 重算，与逐包日志可能不一致）
+- **Observation**: Box(shape=(2,), low=0, high=1) — [norm_Rt, norm_loss]，其中 norm_loss 为离散 5 级（L0=0.0, L1=0.25, L2=0.5, L3=0.75, L4=1.0）
+- **Action**: Discrete(5) — 索引 0-4 对应 μ∈{0.8, 0.9, 1.0, 1.1, 1.2}
+- **Reward**: C++ 在上一 **Rt 组**结束时写入 ShmEnv；组级 QoE（reward 中丢包项用该组 **seq 累计实际丢包率** 重算，与逐包日志可能不一致）
 - **步频说明**: ns-3 仅在每个 **新 (frame_id, Rt) 组** 调用一次 `Act()`，因此 SB3 的 `timesteps` 更接近「Rt 组数」而非「应用层包数」
+- **离散化配置**: Loss 等级阈值和 μ 动作表均可调，详见 [../project_map.md](../project_map.md) 中「状态/动作空间离散化配置」章节
 
 ## 监控
 

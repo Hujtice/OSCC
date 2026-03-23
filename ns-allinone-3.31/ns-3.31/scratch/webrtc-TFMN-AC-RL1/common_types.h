@@ -19,6 +19,33 @@ const uint64_t kMillisPerSecond = 1000;
 const uint64_t kMicroPerMillis = 1000;
 
 // ============================================================================
+// Loss 离散化阈值（L0-L4）
+// 修改方式：增删 kLossThresholds 元素，同步更新 kNumLossLevels
+//   L0: [0,   1%)   极低丢包
+//   L1: [1%,  3%)   基本稳定
+//   L2: [3%,  6%)   已影响 QoE 但未达拥塞阈值
+//   L3: [6%, 10%)   接近 GCC 拥塞触发阈值
+//   L4: [10%, +∞)   严重拥塞/强波动
+// ============================================================================
+constexpr double kLossThresholds[] = {0.01, 0.03, 0.06, 0.10};
+constexpr size_t kNumLossLevels = 5;
+
+inline uint8_t DiscretizeLossLevel(double loss_rate) {
+    for (size_t i = 0; i < sizeof(kLossThresholds) / sizeof(double); ++i) {
+        if (loss_rate < kLossThresholds[i]) return static_cast<uint8_t>(i);
+    }
+    return static_cast<uint8_t>(kNumLossLevels - 1);
+}
+
+// ============================================================================
+// 离散 mu 动作表
+// 修改方式：增删 kMuActions 元素，同步更新 kNumMuActions
+//   Python 端 ns3ai_env.py 中的 MU_ACTIONS 列表必须与此一致
+// ============================================================================
+constexpr double kMuActions[] = {0.8, 0.9, 1.0, 1.1, 1.2};
+constexpr size_t kNumMuActions = 5;
+
+// ============================================================================
 // 工具函数
 // ============================================================================
 inline uint64_t get_os_millis() {
@@ -150,8 +177,8 @@ struct MuExperience {
 
 // 学习器配置结构
 struct MuLearnerConfig {
-    double mu_min = 0.5;
-    double mu_max = 1.5;
+    double mu_min = 0.8;
+    double mu_max = 1.2;
     double rt_max = 10.0; //20.0;
     double loss_max = 0.1;
     double learning_rate = 0.01;

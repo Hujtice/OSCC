@@ -150,7 +150,8 @@ ipcrm -M 1234 2>/dev/null   # 删除 key=1234 的共享内存段（默认 SHM_KE
 ## 训练步数与 C++ 语义（简要）
 
 - Python 每收到一次 `step` 对应 ns-3 一次 `Act()`；当前实现为 **每个新 Rt 组 (frame_id, Rt)** 才调用一次 `Act()`，故 `timesteps` 与「组数」更接近。
-- 详见 [project_map.md](project_map.md) 中「Rt 组级 RL 设计」。
+- 状态 loss 离散为 5 级（L0-L4），动作为 Discrete(5) → μ∈{0.8, 0.9, 1.0, 1.1, 1.2}，仅 PPO 可用。
+- 离散化阈值和动作表的修改方法详见 [project_map.md](project_map.md) 中「状态/动作空间离散化配置」。
 
 ## 下一步
 

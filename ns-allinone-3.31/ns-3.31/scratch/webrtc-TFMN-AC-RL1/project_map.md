@@ -4,7 +4,7 @@
 
 ## 项目概述
 
-基于 ns-3.31 + **ns3-ai** 的 WebRTC 带宽优化仿真项目。Python 端使用 Stable-Baselines3 训练 RL 智能体，通过**共享内存**与 ns-3 交换观测/动作/奖励，动态调整带宽缩放因子 μ∈[0.5, 1.5]。
+基于 ns-3.31 + **ns3-ai** 的 WebRTC 带宽优化仿真项目。Python 端使用 Stable-Baselines3 训练 RL 智能体，通过**共享内存**与 ns-3 交换观测/动作/奖励，动态调整带宽缩放因子 μ∈{0.8, 0.9, 1.0, 1.1, 1.2}（离散 5 值）。
 
 **命名空间**: 所有 C++ 代码在 `namespace oscc` 中。
 
@@ -16,6 +16,46 @@
 2. **观测 loss（滑窗）**：`MuState.loss` / `ShmEnv.norm_loss` 仍来自 **50 包 seq 滑窗** `GetObservedLossRate()`（`ReportPacketSeq` 维护），用于动作选择时的状态。
 3. **组级 reward 的丢包项**：`FinalizeCurrentRtGroup()` 中不再对逐包 `p_loss` 取平均；改为累加组内各包对应的 seq 统计 `(received, expected)`（由 `ReportPacketSeq` 写入 `last_pkt_received_/last_pkt_expected_`，经 `RecordPacketState` 传入），计算 **组实际丢包率** `actual_loss = 1 - sum_received/sum_expected`，用其与 `CalculateReward` 相同的 `Ltol`/`adaptive_tolerance` 公式重算 `new_p_loss`，再与组内平均的 `U、p_delay、p_mddl` 合成 **组级 avg_reward**，供 `Observe()` 与 `*_Frame-Rt-Reward.csv` 的 `loss_rate` 字段。
 4. **包级 CSV**（`*_RL_log.csv`）：仍为每包一条记录，`reward`/`loss_rate` 为当时滑窗下的逐包 `CalculateReward` 结果，便于诊断；与送给 learner 的组级 reward 可能不一致。
+
+## 状态/动作空间离散化配置（重要）
+
+状态的 loss 分量和动作 μ 均已离散化，方便后续调整。
+
+### Loss 等级定义（状态）
+
+| 等级 | 范围 | 含义 | norm_loss 值 |
+|------|------|------|-------------|
+| L0 | [0, 1%) | 极低丢包，可激进 | 0.00 |
+| L1 | [1%, 3%) | 基本稳定 | 0.25 |
+| L2 | [3%, 6%) | 影响 QoE 但未达拥塞阈值 | 0.50 |
+| L3 | [6%, 10%) | 接近 GCC 拥塞触发阈值 | 0.75 |
+| L4 | >= 10% | 严重拥塞/强波动 | 1.00 |
+
+### 离散 μ 动作表
+
+| 动作索引 | μ 值 | 含义 |
+|---------|------|------|
+| 0 | 0.8 | 保守 |
+| 1 | 0.9 | 略保守 |
+| 2 | 1.0 | 中性（= GCC 原始带宽） |
+| 3 | 1.1 | 略激进 |
+| 4 | 1.2 | 激进 |
+
+### 如何重新定义映射
+
+**修改 Loss 等级**：
+
+1. **C++** `common_types.h`：修改 `kLossThresholds[]` 数组。阈值数组有 N 个元素则产生 N+1 个等级。同步更新 `kNumLossLevels = N+1`。`DiscretizeLossLevel()` 函数自动适配数组长度。
+2. **Python** `train.py`：更新 `_NUM_LOSS_LEVELS` 常量使其与 C++ `kNumLossLevels` 一致（仅影响 CSV 日志反归一化）。
+3. `norm_loss` 归一化公式 `level / (kNumLossLevels - 1)` 会自动适配新等级数。
+
+**修改 μ 动作表**：
+
+1. **C++** `common_types.h`：修改 `kMuActions[]` 数组和 `kNumMuActions`。同时更新 `MuLearnerConfig` 中的 `mu_min` / `mu_max` 为新的边界值。
+2. **Python** `ns3ai_env.py`：修改 `MU_ACTIONS` 列表使其与 C++ `kMuActions` 一致。`action_space = Discrete(len(MU_ACTIONS))` 会自动适配新动作数。
+3. 如果动作数改变，之前训练的模型不兼容，需重新训练。
+
+**注意**：当前仅 PPO 支持离散动作（`Discrete`），SAC/TD3 不兼容。
 
 ## 文件结构与职责
 
@@ -82,8 +122,8 @@ struct MuExperience { MuState state; MuAction action; double reward; uint32_t fr
 
 // 学习器配置
 struct MuLearnerConfig {
-    double mu_min = 0.5, mu_max = 1.5;
-    double rt_max = 20.0, loss_max = 0.1;
+    double mu_min = 0.8, mu_max = 1.2;  // 与 kMuActions 边界一致
+    double rt_max = 10.0, loss_max = 0.1;
     double learning_rate = 0.01, baseline_decay = 0.95, grad_clip = 1.0;
     double exploration_sigma = 0.05;
     bool exploration_enabled = true;
@@ -103,7 +143,7 @@ struct RLState { mu, reward, bandwidth_utilization, p_delay, p_loss, p_mddl, ...
 
 // ns3-ai 共享内存结构（与 Python ctypes 对齐，详见 common_types.h）
 // ShmEnv 含 norm_rt, norm_loss, reward, U, p_delay, p_loss, p_mddl, raw_*, gcc/trace_bw, frame_id, done 等
-struct ShmAction { float mu; };
+struct ShmAction { float mu; };  // Python 写入 MU_ACTIONS[action_index]（离散值 0.8/0.9/1.0/1.1/1.2）
 ```
 
 ## 核心模块详解
@@ -132,8 +172,8 @@ class IMuLearner {
 - `NotifySimulationEnd()`: 调用 `rl_->SetFinish()`，供仿真结束前显式调用（避免 _exit 导致 Python 端无法感知结束）
 
 **共享内存规格**（与 Python ns3ai_env.py 中 ctypes 一致）:
-- ShmEnv: norm_rt, norm_loss (float), reward (float), done (uint8)
-- ShmAction: mu (float) ∈ [0.5, 1.5]
+- ShmEnv: norm_rt (float, Rt/rt_max), norm_loss (float, loss_level/4, 离散 5 值 0.0~1.0), reward (float), done (uint8)
+- ShmAction: mu (float) ∈ {0.8, 0.9, 1.0, 1.1, 1.2}（Python 从 Discrete(5) 映射）
 - 默认 shm_id=1234（单流）；多流时 1234+i
 
 ### 3. RLStateManager (rl_state_manager.h/cc) — 状态与奖励计算
@@ -240,10 +280,11 @@ Trace File ──→ BandwidthChanger ──→ P2P Link (带宽切换)         
                                           ┌──────────▼──────────┐
                                           │  Python (SB3)       │
                                           │  Ns3AiGymEnv +      │
-                                          │  PPO / SAC / TD3   │
+                                          │  PPO (Discrete)    │
                                           │  obs: [norm_Rt,    │
-                                          │        norm_loss]  │
-                                          │  action: [μ]       │
+                                          │    norm_loss(L0-4)]│
+                                          │  action: Discrete(5)│
+                                          │  → μ∈{0.8..1.2}   │
                                           │  reward: QoE score │
                                           └─────────────────────┘
 ```
@@ -269,7 +310,7 @@ Trace File ──→ BandwidthChanger ──→ P2P Link (带宽切换)         
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `--algorithm` | RL 算法 (PPO/SAC/TD3) | PPO |
+| `--algorithm` | RL 算法 (PPO 推荐；SAC/TD3 不兼容离散动作，选择时报错) | PPO |
 | `--timesteps` | 训练步数 | 100000 |
 | `--shm-id` | 共享内存块 id（需与 ns-3 AiMuLearner 一致） | 1234 |
 | `--model-dir` | 模型保存目录 | ./models |

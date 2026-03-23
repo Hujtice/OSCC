@@ -9,7 +9,8 @@ NS_LOG_COMPONENT_DEFINE("AiMuLearner");
 
 void AiMuLearner::WriteStateToEnv(ShmEnv* env, const MuState& state) {
     env->norm_rt = static_cast<float>(std::min(state.rt / config_.rt_max, 1.0));
-    env->norm_loss = static_cast<float>(std::min(state.loss / config_.loss_max, 1.0));
+    uint8_t loss_level = DiscretizeLossLevel(state.loss);
+    env->norm_loss = static_cast<float>(loss_level) / static_cast<float>(kNumLossLevels - 1);
     env->reward = static_cast<float>(last_reward_);
     env->U = static_cast<float>(last_U_);
     env->p_delay = static_cast<float>(last_p_delay_);

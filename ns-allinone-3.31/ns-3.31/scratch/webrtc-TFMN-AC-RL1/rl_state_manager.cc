@@ -557,7 +557,7 @@ void RLStateManager::SetCurrentMu(double mu) {
 }
 
 void RLStateManager::SetMu(double mu) {
-    if (mu >= 0.5 && mu <= 1.5) {
+    if (mu >= kMuActions[0] && mu <= kMuActions[kNumMuActions - 1]) {
         current_mu_ = mu;
         NS_LOG_DEBUG("RLStateManager: mu set to " << mu);
     }

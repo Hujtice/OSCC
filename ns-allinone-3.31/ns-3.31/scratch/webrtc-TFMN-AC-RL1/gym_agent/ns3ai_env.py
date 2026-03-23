@@ -12,6 +12,9 @@ except ImportError:
     import gym
     from gym import spaces
 
+# 离散 mu 动作表（必须与 C++ common_types.h 中 kMuActions 一致）
+MU_ACTIONS = [0.8, 0.9, 1.0, 1.1, 1.2]
+
 # ShmEnv / ShmAction must match C++ (common_types.h) and ns3-ai layout
 class ShmEnv(Structure):
     _pack_ = 1
@@ -71,9 +74,7 @@ class Ns3AiGymEnv(gym.Env):
         self.observation_space = spaces.Box(
             low=0.0, high=1.0, shape=(2,), dtype=np.float32
         )
-        self.action_space = spaces.Box(
-            low=0.5, high=1.5, shape=(1,), dtype=np.float32
-        )
+        self.action_space = spaces.Discrete(len(MU_ACTIONS))
 
     def reset(self, seed=None, options=None):
         """Reset the environment and return the first observation.
@@ -101,13 +102,7 @@ class Ns3AiGymEnv(gym.Env):
         to the shared-memory protocol: C++ observes the effect of the last mu,
         calculates the reward, and writes it together with the next observation.
         """
-        # action is [mu] from SB3; clip to [0.5, 1.5]
-        mu_min, mu_max = 1, 1
-        # mu_min, mu_max = 1.0, 1.0
-        mu_mid = (mu_min + mu_max) / 2.0    # 1.0
-        mu_half = (mu_max - mu_min) / 2.0   # 0.2
-        mu = mu_mid + mu_half * np.tanh(action[0])
-        # Acquire: get obs/reward/done that C++ wrote (after our previous action); then write our action
+        mu = MU_ACTIONS[int(action)]
         with self._rl as data:
             if data is None:
                 return self._last_obs.copy(), self._last_reward, True, False, self._last_info

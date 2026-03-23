@@ -40,7 +40,7 @@ except ImportError as e:
     print("Or set PYTHONPATH to include the directory containing py_interface.py and shm_pool.")
     sys.exit(1)
 
-from ns3ai_env import Ns3AiGymEnv
+from ns3ai_env import Ns3AiGymEnv, MU_ACTIONS
 
 # Reward weights (must match C++ rl_state_manager.cc)
 _W_U = 2.5
@@ -49,7 +49,7 @@ _W_LOSS = 10.0
 _W_MDDL = 10.0
 
 _RT_MAX = 10.0
-_LOSS_MAX = 0.1
+_NUM_LOSS_LEVELS = 5  # must match C++ kNumLossLevels
 
 _CSV_HEADER = [
     # core (10)
@@ -57,7 +57,7 @@ _CSV_HEADER = [
     "core_raw_rt", "core_raw_loss", "core_norm_rt", "core_norm_loss",
     "core_reward", "core_action_mu_raw", "core_action_mu", "core_value_estimate",
     # ext (5)
-    "ext_action_mean", "ext_action_std", "ext_action_log_prob",
+    "ext_action_prob", "ext_action_entropy", "ext_action_log_prob",
     "ext_episode_reward_cum", "ext_episode_length",
     # reward raw (5)
     "reward_raw_delay_ms", "reward_raw_loss_rate", "reward_raw_miss_deadline_s",
@@ -92,12 +92,9 @@ class StepLoggerCallback(BaseCallback):
 
         rewards = self.locals.get("rewards", np.array([0.0]))
         reward = float(rewards[0])
-        actions = self.locals.get("actions", np.array([[1.0]]))
-        action_mu_raw = float(actions[0][0])
-        mu_min, mu_max = 1, 1
-        mu_mid = (mu_min + mu_max) / 2.0    # 1.0
-        mu_half = (mu_max - mu_min) / 2.0   # 0.2
-        action_mu = mu_mid + mu_half * np.tanh(action_mu_raw)
+        actions = self.locals.get("actions", np.array([2]))
+        action_index = int(actions[0])
+        action_mu = MU_ACTIONS[action_index] if 0 <= action_index < len(MU_ACTIONS) else 1.0
 
         # --- core: value estimate (PPO stores it in locals) ---
         values_t = self.locals.get("values")
@@ -106,7 +103,7 @@ class StepLoggerCallback(BaseCallback):
         else:
             value_est = float("nan")
 
-        # --- ext: action_mean, action_std, log_prob ---
+        # --- ext: action_prob, action_entropy, log_prob (Categorical) ---
         log_probs_t = self.locals.get("log_probs")
         log_prob = float(log_probs_t[0]) if log_probs_t is not None else float("nan")
 
@@ -114,11 +111,12 @@ class StepLoggerCallback(BaseCallback):
         if obs_tensor is not None:
             with th.no_grad():
                 dist = self.model.policy.get_distribution(obs_tensor)
-                action_mean = float(dist.distribution.mean[0][0])
-                action_std = float(dist.distribution.stddev[0][0])
+                probs = dist.distribution.probs[0]
+                action_prob = float(probs[action_index]) if action_index < len(probs) else float("nan")
+                action_entropy = float(dist.distribution.entropy()[0])
         else:
-            action_mean = float("nan")
-            action_std = float("nan")
+            action_prob = float("nan")
+            action_entropy = float("nan")
 
         # --- core: observation that led to this action ---
         if obs_tensor is not None:
@@ -132,7 +130,7 @@ class StepLoggerCallback(BaseCallback):
 
         # --- core: de-normalize to raw values ---
         raw_rt = norm_rt * _RT_MAX
-        raw_loss = norm_loss * _LOSS_MAX
+        raw_loss = norm_loss * (_NUM_LOSS_LEVELS - 1)  # loss level 0-4
 
         # --- ext: episode cumulative tracking ---
         self._ep_reward += reward
@@ -161,9 +159,9 @@ class StepLoggerCallback(BaseCallback):
 
         self._writer.writerow([
             self.num_timesteps, frame_id,
-            f"{raw_rt:.2f}", f"{raw_loss:.6f}", f"{norm_rt:.6f}", f"{norm_loss:.6f}",
-            f"{reward:.6f}", f"{action_mu_raw:.6f}", f"{action_mu:.6f}", f"{value_est:.6f}",
-            f"{action_mean:.6f}", f"{action_std:.6f}", f"{log_prob:.6f}",
+            f"{raw_rt:.2f}", f"{raw_loss:.1f}", f"{norm_rt:.6f}", f"{norm_loss:.6f}",
+            f"{reward:.6f}", action_index, f"{action_mu:.2f}", f"{value_est:.6f}",
+            f"{action_prob:.6f}", f"{action_entropy:.6f}", f"{log_prob:.6f}",
             f"{self._ep_reward:.6f}", self._ep_len,
             f"{r_raw_delay:.4f}", f"{r_raw_loss:.6f}", f"{r_raw_mddl:.6f}",
             f"{r_gcc:.2f}", f"{r_trace:.2f}",
@@ -214,6 +212,10 @@ def main():
     parser.add_argument("--log-dir", type=str, default="./logs")
     parser.add_argument("--load-model", type=str, default=None)
     args = parser.parse_args()
+
+    if args.algorithm in ("SAC", "TD3"):
+        print(f"ERROR: {args.algorithm} 不支持离散动作空间 (Discrete)。请使用 PPO。")
+        sys.exit(1)
 
     os.makedirs(args.model_dir, exist_ok=True)
     os.makedirs(args.log_dir, exist_ok=True)
