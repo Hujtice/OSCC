@@ -12,6 +12,7 @@ void AiMuLearner::WriteStateToEnv(ShmEnv* env, const MuState& state) {
     uint8_t loss_level = DiscretizeLossLevel(state.loss);
     env->norm_loss = static_cast<float>(loss_level) / static_cast<float>(kNumLossLevels - 1);
     env->reward = static_cast<float>(last_reward_);
+    // std::cout << "<写入共享内存> reward的值是: " << env->reward << std::endl;
     env->U = static_cast<float>(last_U_);
     env->p_delay = static_cast<float>(last_p_delay_);
     env->p_loss = static_cast<float>(last_p_loss_);
@@ -112,6 +113,7 @@ MuAction AiMuLearner::Act(const MuState& state) {
 void AiMuLearner::Observe(const MuExperience& exp) {
     baseline_ = config_.baseline_decay * baseline_ + (1.0 - config_.baseline_decay) * exp.reward;
     last_reward_ = exp.reward;
+    // std::cout << "赋值reward: " << exp.reward << std::endl;
     last_done_ = 0;  // continuous task, never done until simulation stops
     last_U_ = exp.U;
     last_p_delay_ = exp.p_delay;

@@ -165,15 +165,32 @@ double RLStateManager::CalculateReward(double real_throughput_bps, double trace_
     std::cout << "错过截止时间惩罚: " << p_mddl << std::endl;
 
     //待修改，根据Rt调整权重
-    double U_weight = 2.5;
-    double delay_weight = 10;
-    double loss_weight = 10;
-    double mddl_weight = 10.0;
+    // double U_weight = 10;
+    // double delay_weight = 2.5;
+    // double loss_weight = 10;
+    // double mddl_weight = 10.0;
 
-    double reward = U_weight * U 
-                  - delay_weight * p_delay 
-                  - loss_weight * p_loss 
-                  - mddl_weight * p_mddl;
+    // double reward = U_weight * U 
+    //               - delay_weight * p_delay 
+    //               - loss_weight * p_loss 
+    //               - mddl_weight * p_mddl;
+
+    double U_weight = 10 * (1 + Rt_used);
+    double delay_weight = 2.5 / (1 + Rt_used);
+    double loss_weight = 10.0 * std::exp(-static_cast<double>(Rt_used));
+    double mddl_weight = 10.0 * (1 + Rt_used);
+
+    double final_U_weight = U_weight / (U_weight + delay_weight + loss_weight + mddl_weight);
+    double final_delay_weight = delay_weight / (U_weight + delay_weight + loss_weight + mddl_weight);
+    double final_loss_weight = loss_weight / (U_weight + delay_weight + loss_weight + mddl_weight);
+    double final_mddl_weight = mddl_weight / (U_weight + delay_weight + loss_weight + mddl_weight);
+
+    double reward = final_U_weight * U 
+                  - final_delay_weight * p_delay 
+                  - final_loss_weight * p_loss 
+                  - final_mddl_weight * p_mddl;
+
+    std::cout << "<RLStateManager><CalculateReward>reward: " << reward << std::endl;
 
     if (out_U) *out_U = U;
     if (out_p_delay) *out_p_delay = p_delay;
@@ -306,15 +323,32 @@ void RLStateManager::FinalizeCurrentRtGroup() {
         double avg_p_delay = current_rt_group_.sum_p_delay / n;
         double avg_p_mddl = current_rt_group_.sum_p_mddl / n;
 
-        constexpr double U_weight = 2.5;
-        constexpr double delay_weight = 10.0;
-        constexpr double loss_weight = 10.0;
-        constexpr double mddl_weight = 10.0;
+        // constexpr double U_weight = 10;
+        // constexpr double delay_weight = 2.5;
+        // constexpr double loss_weight = 10.0;
+        // constexpr double mddl_weight = 10.0;
 
-        current_rt_group_.avg_reward = U_weight * avg_U
-                                     - delay_weight * avg_p_delay
-                                     - loss_weight * new_p_loss
-                                     - mddl_weight * avg_p_mddl;
+        // current_rt_group_.avg_reward = U_weight * avg_U
+        //                              - delay_weight * avg_p_delay
+        //                              - loss_weight * new_p_loss
+        //                              - mddl_weight * avg_p_mddl;
+
+        // 基于Rt的动态权重
+        double temp_U_weight = 10 * (1 + Rt_used);
+        double temp_delay_weight = 2.5 / (1 + Rt_used);
+        double temp_loss_weight = 10.0 * std::exp(-static_cast<double>(Rt_used));
+        double temp_mddl_weight = 10.0 * (1 + Rt_used);
+
+        // 归一化
+        double final_U_weight = temp_U_weight / (temp_U_weight + temp_delay_weight + temp_loss_weight + temp_mddl_weight);
+        double final_delay_weight = temp_delay_weight / (temp_U_weight + temp_delay_weight + temp_loss_weight + temp_mddl_weight);
+        double final_loss_weight = temp_loss_weight / (temp_U_weight + temp_delay_weight + temp_loss_weight + temp_mddl_weight);
+        double final_mddl_weight = temp_mddl_weight / (temp_U_weight + temp_delay_weight + temp_loss_weight + temp_mddl_weight);
+
+        current_rt_group_.avg_reward = final_U_weight * avg_U
+                                     - final_delay_weight * avg_p_delay
+                                     - final_loss_weight * new_p_loss
+                                     - final_mddl_weight * avg_p_mddl;
 
         current_rt_group_.loss_rate = actual_loss;
 

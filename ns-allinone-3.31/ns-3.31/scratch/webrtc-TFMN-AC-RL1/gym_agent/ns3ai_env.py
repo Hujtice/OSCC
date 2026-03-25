@@ -13,7 +13,8 @@ except ImportError:
     from gym import spaces
 
 # 离散 mu 动作表（必须与 C++ common_types.h 中 kMuActions 一致）
-MU_ACTIONS = [0.8, 0.9, 1.0, 1.1, 1.2]
+# MU_ACTIONS = [0.8, 0.9, 1.0, 1.1, 1.2]
+MU_ACTIONS = [0.95,0.975,1.0,1.025,1.05]
 
 # ShmEnv / ShmAction must match C++ (common_types.h) and ns3-ai layout
 class ShmEnv(Structure):
@@ -108,6 +109,7 @@ class Ns3AiGymEnv(gym.Env):
                 return self._last_obs.copy(), self._last_reward, True, False, self._last_info
             obs = np.array([data.env.norm_rt, data.env.norm_loss], dtype=np.float32)
             reward = float(data.env.reward)
+            print("reward: ", reward)
             done = bool(data.env.done)
             info = {
                 "reward_U": float(data.env.U),

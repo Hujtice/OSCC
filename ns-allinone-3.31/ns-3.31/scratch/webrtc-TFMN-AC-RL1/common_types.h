@@ -42,7 +42,8 @@ inline uint8_t DiscretizeLossLevel(double loss_rate) {
 // 修改方式：增删 kMuActions 元素，同步更新 kNumMuActions
 //   Python 端 ns3ai_env.py 中的 MU_ACTIONS 列表必须与此一致
 // ============================================================================
-constexpr double kMuActions[] = {0.8, 0.9, 1.0, 1.1, 1.2};
+constexpr double kMuActions[] = {0.95, 0.975, 1.0, 1.025, 1.05};
+// constexpr double kMuActions[] = {0.8, 0.9, 1.0, 1.1, 1.2};
 constexpr size_t kNumMuActions = 5;
 
 // ============================================================================
@@ -177,8 +178,8 @@ struct MuExperience {
 
 // 学习器配置结构
 struct MuLearnerConfig {
-    double mu_min = 0.8;
-    double mu_max = 1.2;
+    double mu_min = 0.5; // 动作的上下限
+    double mu_max = 1.5;
     double rt_max = 10.0; //20.0;
     double loss_max = 0.1;
     double learning_rate = 0.01;
