@@ -124,7 +124,7 @@ void QoEIntegrationManager::OnPacketReceived(const FramePacketInfo& info, const 
         ? std::min(real_throughput_bps / real_trace_bw, 1.0)
         : 0.0;
     double scaled_bw = mu * gcc_bw;
-
+    
     rl_manager_->RecordPacketState(info.frame_id, packet_idx, mu, Rt, observed_loss, reward,
                                    send_time, now, frame_stats.playout_deadline,
                                    bw_util, out_p_delay, out_p_loss, out_p_mddl, delay_ms,

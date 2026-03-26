@@ -70,21 +70,22 @@ uint32_t RLStateManager::CalculateTransmissionOpportunities(Time current_time, T
     // NS_LOG_DEBUG("  RTT: " << current_rtt_.GetSeconds() << "s");
     // NS_LOG_DEBUG("  Rt: " << Rt);
     
-    // std::cout << "计算传输机会："
-    //           << "当前时间: " << current_time.GetSeconds() << "s" << std::endl
-    //           << "截止时间: " << frame_deadline.GetSeconds() << "s" << std::endl
-    //           << "剩余时间: " << T_remain.GetSeconds() << "s" << std::endl
-    //           << "包大小: " << packet_size << " bytes" << std::endl
-    //           << "带宽: " << trace_bandwidth_bps << " bps" << std::endl
-    //           << "包发送时间: " << packet_send_time.GetSeconds() << "s" << std::endl
-    //           << "可用时间: " << available_time.GetSeconds() << "s" << std::endl
-    //           << "RTT的值: " << current_rtt_.GetSeconds() << "s" << std::endl
-    //           << "Rt的值: " << Rt << std::endl;
+    std::cout << "计算传输机会："
+              << "当前时间: " << current_time.GetSeconds() << "s" << std::endl
+              << "截止时间: " << frame_deadline.GetSeconds() << "s" << std::endl
+              << "剩余时间: " << T_remain.GetSeconds() << "s" << std::endl
+              << "包大小: " << packet_size << " bytes" << std::endl
+              << "带宽: " << trace_bandwidth_bps << " bps" << std::endl
+              << "包发送时间: " << packet_send_time.GetSeconds() << "s" << std::endl
+              << "可用时间: " << available_time.GetSeconds() << "s" << std::endl
+              << "RTT的值: " << current_rtt_.GetSeconds() << "s" << std::endl
+              << "Rt的值: " << Rt << std::endl;
     
     return Rt;
 }
 
 double RLStateManager::CalculateReward(double real_throughput_bps, double trace_bandwidth_bps,
+                                    //    double scaled_bw_bps,
                                        double current_delay_ms, double current_loss_rate, 
                                        double miss_deadline_time, uint32_t Rt_current, uint32_t Rt_prev,
                                        uint32_t frame_id, uint32_t packet_index,
@@ -101,6 +102,8 @@ double RLStateManager::CalculateReward(double real_throughput_bps, double trace_
     // (1) 带宽利用率 U — 接收端实测吞吐量 / 真实链路带宽
     double U = (trace_bandwidth_bps > 0.0) ? (real_throughput_bps / trace_bandwidth_bps) : 0.0;
     U = std::min(std::max(U, 0.0), 1.0);
+
+    std::cout << "带宽利用率U: " << U << std::endl;
     
     // (2) 延迟惩罚 - 使用实际延迟
     double p_delay = 0.0;
@@ -113,56 +116,68 @@ double RLStateManager::CalculateReward(double real_throughput_bps, double trace_
         p_delay = current_delay_ms / 50.0 + 0.65;
     }
     p_delay = std::min(p_delay, 1.0);
+
+    std::cout << "当前延迟current_delay_ms: " << current_delay_ms << std::endl;
+    std::cout << "延迟惩罚p_delay: " << p_delay << std::endl;
     
     // Rt越小，对延迟越敏感
-    double delay_sensitivity = 1.0 + (1.0 - Rt_used / 10.0) * 0.3;
-    p_delay *= delay_sensitivity;
+    // double delay_sensitivity = 1.0 + (1.0 - Rt_used / 10.0) * 0.3;
+    // p_delay *= delay_sensitivity;
     
-    // (3) 丢包率惩罚
-    double Ptget = 1.0 - max_loss_rate_;
-    double Ltol;
-    if (Rt_used == 0) {
-        Ltol = 0.01;
-    } else {
-        Ltol = std::pow(1.0 - Ptget, 1.0 / Rt_used);
-    }
+    // (3) 丢包率惩罚：基于 Rt 的自适应容忍度归一化
+    // 设计目标：Rt 越小越敏感（更严格），Rt 越大越宽容（更宽松）
+    // double Ptget = 1.0 - max_loss_rate_;  // max_loss_rate_ 用作可接受丢包阈值（例如 0.10）
+    // double Ltol;
+    // if (Rt_used == 0) {
+    //     Ltol = 0.01;  // 最紧急场景的最小容忍度
+    // } else {
+    //     // Ltol(Rt) = 1 - Ptget^(1/Rt)
+    //     Ltol = 1.0 - std::pow(Ptget, 1.0 / static_cast<double>(Rt_used));
+    // }
+    // double adaptive_tolerance = Ltol * (1.0 + 0.5 * (static_cast<double>(Rt_used) / 10.0));
+    // adaptive_tolerance = std::max(adaptive_tolerance, 1e-6);
 
-    // 自适应丢包容忍度
-    double adaptive_tolerance = Ltol * (1.0 + 0.5 * (Rt_used / 10.0));
-    double p_loss = current_loss_rate / adaptive_tolerance;
-    p_loss = std::min(p_loss, 1.0);
-    
+
+    double p_loss = std::min(current_loss_rate, 1.0);
+    std::cout << "当前丢包率current_loss_rate: " << current_loss_rate << std::endl;
+    std::cout << "丢包率惩罚p_loss: " << p_loss << std::endl;
+
     // (4) 错过截止时间惩罚
     double p_mddl = 0.0;
     double rtt_milliseconds = current_rtt_.GetMilliSeconds();
-    
-    if (packet_index == 0) {
-        if (Rt_current > 0) {
-            double denominator = (Rt_current - Rt_prev + 1) * rtt_milliseconds;
-            std::cout << "denominator: " << denominator << std::endl;
-            std::cout << "miss_deadline_time: " << miss_deadline_time << std::endl;
-            if (denominator > 0.001) {
-                p_mddl = miss_deadline_time / denominator;
-                p_mddl = std::min(std::max(p_mddl, 0.0), 1.0);
-            }
-        }
-    } else {
-        uint32_t Rt_frame_first = Rt_current + packet_index;
-        if (Rt_frame_first > 0) {
-            double denominator = (Rt_frame_first - Rt_prev + 1) * rtt_milliseconds;
-            std::cout << "denominator: " << denominator << std::endl;
-            std::cout << "miss_deadline_time: " << miss_deadline_time << std::endl;
-            if (denominator > 0.001) {
-                p_mddl = miss_deadline_time / denominator;
-                p_mddl = std::min(std::max(p_mddl, 0.0), 1.0);
-            }
-        }
-    }
 
-    std::cout << "带宽利用率: " << U << std::endl;
-    std::cout << "丢包率惩罚: " << p_loss << std::endl;
-    std::cout << "延迟惩罚: " << p_delay << std::endl;
-    std::cout << "错过截止时间惩罚: " << p_mddl << std::endl;
+    p_mddl = std::min(miss_deadline_time / (miss_deadline_time + rtt_milliseconds), 1.0);
+    std::cout << "错过截止时间miss_deadline_time: " << miss_deadline_time << std::endl;
+    std::cout << "RTT: " << rtt_milliseconds << std::endl;
+    std::cout << "错过截止时间惩罚p_mddl: " << p_mddl << std::endl;
+
+    // if (packet_index == 0) {
+    //     if (Rt_current > 0) {
+    //         double denominator = (Rt_current - Rt_prev + 1) * rtt_milliseconds;
+    //         std::cout << "denominator: " << denominator << std::endl;
+    //         std::cout << "miss_deadline_time: " << miss_deadline_time << std::endl;
+    //         if (denominator > 0.001) {
+    //             p_mddl = miss_deadline_time / denominator;
+    //             p_mddl = std::min(std::max(p_mddl, 0.0), 1.0);
+    //         }
+    //     }
+    // } else {
+    //     uint32_t Rt_frame_first = Rt_current + packet_index;
+    //     if (Rt_frame_first > 0) {
+    //         double denominator = (Rt_frame_first - Rt_prev + 1) * rtt_milliseconds;
+    //         std::cout << "denominator: " << denominator << std::endl;
+    //         std::cout << "miss_deadline_time: " << miss_deadline_time << std::endl;
+    //         if (denominator > 0.001) {
+    //             p_mddl = miss_deadline_time / denominator;
+    //             p_mddl = std::min(std::max(p_mddl, 0.0), 1.0);
+    //         }
+    //     }
+    // }
+
+    // std::cout << "带宽利用率: " << U << std::endl;
+    // std::cout << "丢包率惩罚: " << p_loss << std::endl;
+    // std::cout << "延迟惩罚: " << p_delay << std::endl;
+    // std::cout << "错过截止时间惩罚: " << p_mddl << std::endl;
 
     //待修改，根据Rt调整权重
     // double U_weight = 10;
@@ -175,22 +190,50 @@ double RLStateManager::CalculateReward(double real_throughput_bps, double trace_
     //               - loss_weight * p_loss 
     //               - mddl_weight * p_mddl;
 
-    double U_weight = 10 * (1 + Rt_used);
-    double delay_weight = 2.5 / (1 + Rt_used);
-    double loss_weight = 10.0 * std::exp(-static_cast<double>(Rt_used));
-    double mddl_weight = 10.0 * (1 + Rt_used);
+    // (5) 过载惩罚：scaled_bw 超过 trace_bw 的部分直接扣分（避免拥塞导致高丢包/跳帧）
+    // double p_over = 0.0;
+    // if (trace_bandwidth_bps > 0.0) {
+    //     const double ratio = scaled_bw_bps / trace_bandwidth_bps;
+    //     p_over = std::max(0.0, ratio - 1.0);
+    //     p_over = std::min(p_over, 1.0);
+    // }
 
-    double final_U_weight = U_weight / (U_weight + delay_weight + loss_weight + mddl_weight);
-    double final_delay_weight = delay_weight / (U_weight + delay_weight + loss_weight + mddl_weight);
-    double final_loss_weight = loss_weight / (U_weight + delay_weight + loss_weight + mddl_weight);
-    double final_mddl_weight = mddl_weight / (U_weight + delay_weight + loss_weight + mddl_weight);
+    // 权重随 Rt 调整（随后做归一化）
+    double U_weight = 5.0 * std::log(1.0 + static_cast<double>(Rt_used)) + 2.0;
+    double delay_weight = 2.5;
+    double loss_weight = 20.0 / (1.0 + 0.5 * static_cast<double>(Rt_used));
+    double mddl_weight = 8.0 * std::log(1.0 + static_cast<double>(Rt_used)) + 2.0;
 
-    double reward = final_U_weight * U 
-                  - final_delay_weight * p_delay 
-                  - final_loss_weight * p_loss 
-                  - final_mddl_weight * p_mddl;
+    std::cout << "U_weight: " << U_weight << std::endl;
+    std::cout << "delay_weight: " << delay_weight << std::endl;
+    std::cout << "loss_weight: " << loss_weight << std::endl;
+    std::cout << "mddl_weight: " << mddl_weight << std::endl;
+    // Rt 越小越怕过载
+    // double over_weight = 10.0 / (1.0 + static_cast<double>(Rt_used));
 
-    std::cout << "<RLStateManager><CalculateReward>reward: " << reward << std::endl;
+    // // 归一化
+    double total_weight = U_weight + delay_weight + loss_weight + mddl_weight; // + over_weight;
+    U_weight /= total_weight;
+    delay_weight /= total_weight;
+    loss_weight /= total_weight;
+    mddl_weight /= total_weight;
+    // over_weight /= total_weight;
+
+    double reward = U_weight * U 
+                  - delay_weight * p_delay 
+                  - loss_weight * p_loss 
+                  - mddl_weight * p_mddl;
+                //   - over_weight * p_over;
+
+    // double U_weight = 10 * (1 + Rt_used);
+    // double delay_weight = 2.5 / (1 + Rt_used);
+    // double loss_weight = 10.0 * std::exp(-static_cast<double>(Rt_used));
+    // double mddl_weight = 10.0 * (1 + Rt_used);
+
+    // double final_U_weight = U_weight / (U_weight + delay_weight + loss_weight + mddl_weight);
+    // double final_delay_weight = delay_weight / (U_weight + delay_weight + loss_weight + mddl_weight);
+    // double final_loss_weight = loss_weight / (U_weight + delay_weight + loss_weight + mddl_weight);
+    // double final_mddl_weight = mddl_weight / (U_weight + delay_weight + loss_weight + mddl_weight);
 
     if (out_U) *out_U = U;
     if (out_p_delay) *out_p_delay = p_delay;
@@ -255,9 +298,9 @@ void RLStateManager::AddPacketToRtGroup(uint32_t frame_id, uint32_t packet_index
                                         uint32_t pkt_received, uint32_t pkt_expected) {
     if (current_rt_group_.frame_id != frame_id || current_rt_group_.Rt_value != Rt) {
         if (current_rt_group_.packet_count > 0) {
-            std::cout << "结束一个Rt组了" 
-                      << "当前frame_id: " << frame_id
-                      << "当前Rt: " << Rt << std::endl;
+            // std::cout << "结束一个Rt组了" 
+            //           << "当前frame_id: " << frame_id
+            //           << "当前Rt: " << Rt << std::endl;
             FinalizeCurrentRtGroup();
         }
         
@@ -307,48 +350,69 @@ void RLStateManager::FinalizeCurrentRtGroup() {
                               / static_cast<double>(current_rt_group_.group_expected);
         }
 
-        double Ptget = 1.0 - max_loss_rate_;
-        uint32_t Rt_used = current_rt_group_.Rt_value;
-        double Ltol;
-        if (Rt_used == 0) {
-            Ltol = 0.01;
-        } else {
-            Ltol = std::pow(1.0 - Ptget, 1.0 / static_cast<double>(Rt_used));
-        }
-        double adaptive_tolerance = Ltol * (1.0 + 0.5 * (static_cast<double>(Rt_used) / 10.0));
-        double new_p_loss = std::min(actual_loss / adaptive_tolerance, 1.0);
+        // double Ptget = 1.0 - max_loss_rate_;
+        // uint32_t Rt_used = current_rt_group_.Rt_value;
+        // double Ltol;
+        // if (Rt_used == 0) {
+        //     Ltol = 0.01;
+        // } else {
+        //     Ltol = std::pow(1.0 - Ptget, 1.0 / static_cast<double>(Rt_used));
+        // }
+        // double adaptive_tolerance = Ltol * (1.0 + 0.5 * (static_cast<double>(Rt_used) / 10.0));
+        // double new_p_loss = std::min(actual_loss / adaptive_tolerance, 1.0);
+        double new_p_loss = actual_loss;
 
         double n = static_cast<double>(current_rt_group_.packet_count);
+        std::cout << "当前frame_id: " << current_rt_group_.frame_id << "当前Rt: " << current_rt_group_.Rt_value << "当前包数: " << n << std::endl;
         double avg_U = current_rt_group_.sum_U / n;
         double avg_p_delay = current_rt_group_.sum_p_delay / n;
         double avg_p_mddl = current_rt_group_.sum_p_mddl / n;
 
-        // constexpr double U_weight = 10;
-        // constexpr double delay_weight = 2.5;
-        // constexpr double loss_weight = 10.0;
-        // constexpr double mddl_weight = 10.0;
+        std::cout << "计算Rt组平均值:" << std::endl;
+        std::cout << "avg_U: " << avg_U << std::endl;
+        std::cout << "avg_p_delay: " << avg_p_delay << std::endl;
+        std::cout << "avg_p_mddl: " << avg_p_mddl << std::endl;
+
+        double U_weight = 5 * std::log(1 + current_rt_group_.Rt_value) + 2;
+        double delay_weight = 2.5;
+        double loss_weight = 10.0 / (1 + 0.5 * current_rt_group_.Rt_value);
+        double mddl_weight = 8 * std::log(1 + current_rt_group_.Rt_value) + 2;
+
+        std::cout << "U_weight: " << U_weight << std::endl;
+        std::cout << "delay_weight: " << delay_weight << std::endl;
+        std::cout << "loss_weight: " << loss_weight << std::endl;
+        std::cout << "mddl_weight: " << mddl_weight << std::endl;
+
+        // 归一化
+        double total_weight = U_weight + delay_weight + loss_weight + mddl_weight;
+        U_weight /= total_weight;
+        delay_weight /= total_weight;
+        loss_weight /= total_weight;
+        mddl_weight /= total_weight;
 
         // current_rt_group_.avg_reward = U_weight * avg_U
         //                              - delay_weight * avg_p_delay
         //                              - loss_weight * new_p_loss
         //                              - mddl_weight * avg_p_mddl;
 
+        current_rt_group_.avg_reward = current_rt_group_.reward_sum / n;
+
         // 基于Rt的动态权重
-        double temp_U_weight = 10 * (1 + Rt_used);
-        double temp_delay_weight = 2.5 / (1 + Rt_used);
-        double temp_loss_weight = 10.0 * std::exp(-static_cast<double>(Rt_used));
-        double temp_mddl_weight = 10.0 * (1 + Rt_used);
+        // double temp_U_weight = 10 * (1 + Rt_used);
+        // double temp_delay_weight = 2.5 / (1 + Rt_used);
+        // double temp_loss_weight = 10.0 * std::exp(-static_cast<double>(Rt_used));
+        // double temp_mddl_weight = 10.0 * (1 + Rt_used);
 
-        // 归一化
-        double final_U_weight = temp_U_weight / (temp_U_weight + temp_delay_weight + temp_loss_weight + temp_mddl_weight);
-        double final_delay_weight = temp_delay_weight / (temp_U_weight + temp_delay_weight + temp_loss_weight + temp_mddl_weight);
-        double final_loss_weight = temp_loss_weight / (temp_U_weight + temp_delay_weight + temp_loss_weight + temp_mddl_weight);
-        double final_mddl_weight = temp_mddl_weight / (temp_U_weight + temp_delay_weight + temp_loss_weight + temp_mddl_weight);
+        // // 归一化
+        // double final_U_weight = temp_U_weight / (temp_U_weight + temp_delay_weight + temp_loss_weight + temp_mddl_weight);
+        // double final_delay_weight = temp_delay_weight / (temp_U_weight + temp_delay_weight + temp_loss_weight + temp_mddl_weight);
+        // double final_loss_weight = temp_loss_weight / (temp_U_weight + temp_delay_weight + temp_loss_weight + temp_mddl_weight);
+        // double final_mddl_weight = temp_mddl_weight / (temp_U_weight + temp_delay_weight + temp_loss_weight + temp_mddl_weight);
 
-        current_rt_group_.avg_reward = final_U_weight * avg_U
-                                     - final_delay_weight * avg_p_delay
-                                     - final_loss_weight * new_p_loss
-                                     - final_mddl_weight * avg_p_mddl;
+        // current_rt_group_.avg_reward = final_U_weight * avg_U
+        //                              - final_delay_weight * avg_p_delay
+        //                              - final_loss_weight * new_p_loss
+        //                              - final_mddl_weight * avg_p_mddl;
 
         current_rt_group_.loss_rate = actual_loss;
 

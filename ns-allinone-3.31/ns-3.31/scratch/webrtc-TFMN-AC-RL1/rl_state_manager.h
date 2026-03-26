@@ -25,6 +25,7 @@ public:
     
     // 计算奖励（out_U/out_p_delay/out_p_loss/out_p_mddl 输出未加权子项）
     double CalculateReward(double real_throughput_bps, double trace_bandwidth_bps,
+                        //   double scaled_bw_bps,
                           double current_delay_ms, double current_loss_rate, 
                           double miss_deadline_time, uint32_t Rt_current, uint32_t Rt_prev,
                           uint32_t frame_id, uint32_t packet_index,

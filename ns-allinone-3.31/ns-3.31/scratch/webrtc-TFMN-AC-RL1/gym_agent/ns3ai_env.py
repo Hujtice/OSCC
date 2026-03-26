@@ -109,7 +109,6 @@ class Ns3AiGymEnv(gym.Env):
                 return self._last_obs.copy(), self._last_reward, True, False, self._last_info
             obs = np.array([data.env.norm_rt, data.env.norm_loss], dtype=np.float32)
             reward = float(data.env.reward)
-            print("reward: ", reward)
             done = bool(data.env.done)
             info = {
                 "reward_U": float(data.env.U),
