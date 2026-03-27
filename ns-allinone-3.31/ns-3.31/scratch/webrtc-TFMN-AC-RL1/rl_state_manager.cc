@@ -43,13 +43,13 @@ void RLStateManager::SetParameters(double initial_mu, double lmax, Time rtt) {
 }
 
 uint32_t RLStateManager::CalculateTransmissionOpportunities(Time current_time, Time frame_deadline, 
-                                                            uint32_t packet_size, double trace_bandwidth_bps) {
+                                                            uint32_t packet_size, double gcc_bw_bps) {
     Time T_remain = frame_deadline - current_time;
     if (T_remain <= Seconds(0)) {
         return 0;
     }
     
-    double send_time_seconds = static_cast<double>(packet_size * 8) / trace_bandwidth_bps;
+    double send_time_seconds = static_cast<double>(packet_size * 8) / gcc_bw_bps;
     Time packet_send_time = Seconds(send_time_seconds);
     
     Time available_time = T_remain - packet_send_time;
@@ -75,7 +75,7 @@ uint32_t RLStateManager::CalculateTransmissionOpportunities(Time current_time, T
               << "截止时间: " << frame_deadline.GetSeconds() << "s" << std::endl
               << "剩余时间: " << T_remain.GetSeconds() << "s" << std::endl
               << "包大小: " << packet_size << " bytes" << std::endl
-              << "带宽: " << trace_bandwidth_bps << " bps" << std::endl
+              << "gcc带宽: " << gcc_bw_bps << " bps" << std::endl
               << "包发送时间: " << packet_send_time.GetSeconds() << "s" << std::endl
               << "可用时间: " << available_time.GetSeconds() << "s" << std::endl
               << "RTT的值: " << current_rtt_.GetSeconds() << "s" << std::endl
@@ -201,7 +201,7 @@ double RLStateManager::CalculateReward(double real_throughput_bps, double trace_
     // 权重随 Rt 调整（随后做归一化）
     double U_weight = 5.0 * std::log(1.0 + static_cast<double>(Rt_used)) + 2.0;
     double delay_weight = 2.5;
-    double loss_weight = 20.0 / (1.0 + 0.5 * static_cast<double>(Rt_used));
+    double loss_weight = 10.0 / (1.0 + 0.5 * static_cast<double>(Rt_used));
     double mddl_weight = 8.0 * std::log(1.0 + static_cast<double>(Rt_used)) + 2.0;
 
     std::cout << "U_weight: " << U_weight << std::endl;

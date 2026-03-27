@@ -62,7 +62,7 @@ void QoEIntegrationManager::OnPacketReceived(const FramePacketInfo& info, const 
 
     // Rt 用真实链路带宽计算
     uint32_t Rt = rl_manager_->CalculateTransmissionOpportunities(
-        now, frame_stats.playout_deadline, info.packet_size, real_trace_bw);
+        now, frame_stats.playout_deadline, info.packet_size, gcc_bw);
 
     double mu = rl_manager_->GetCurrentMu();
     double old_mu = mu;
