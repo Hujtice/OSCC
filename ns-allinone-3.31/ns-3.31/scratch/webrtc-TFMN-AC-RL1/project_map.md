@@ -372,7 +372,6 @@ nohup ./waf --run "scratch/webrtc-TFMN-AC-RL1/webrtc-TFMN-AC-RL1 \
   --skip=true --mu=1.0 --ls=0.01 \
   --folder=trace_results/ai_training --it=ai_test" \
   > ns3输出 2>&1 &
-  > /dev/null 2>&1 &
 
 nohup ./waf --run "scratch/webrtc-TFMN-AC-RL1/webrtc-TFMN-AC-RL1 \
   --trace=traces/traces/AItrans/AItrans_6_part_1.log \
@@ -395,6 +394,20 @@ nohup python3.12 train.py --algorithm PPO --timesteps 5000000 > train_output.log
 # 断点接训
 nohup python3.12 train.py --algorithm PPO --timesteps 8000000 --load-model ./models/PPO_webrtc_mu_20260310_174735_final.zip > train_output2.log 2>&1 &
 ```
+
+```bash
+# 清理文件
+cd home/hjt/OSCC/ns-allinone-3.31/ns-3.31/scratch/webrtc-TFMN-AC-RL1/gym_agent/models
+rm *.zip
+cd home/hjt/OSCC/ns-allinone-3.31/ns-3.31/scratch/webrtc-TFMN-AC-RL1/gym_agent/logs
+rm -rf *
+cd /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/webrtc_simulation_logs/output_csv
+rm -f *
+cd /home/hjt/OSCC/ns-allinone-3.31/ns-3.31/webrtc_simulation_logs/output_pic
+rm -f *
+
+```
+
 
 
 

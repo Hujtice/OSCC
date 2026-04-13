@@ -180,15 +180,15 @@ double RLStateManager::CalculateReward(double real_throughput_bps, double trace_
     // std::cout << "错过截止时间惩罚: " << p_mddl << std::endl;
 
     //待修改，根据Rt调整权重
-    // double U_weight = 10;
-    // double delay_weight = 2.5;
-    // double loss_weight = 10;
-    // double mddl_weight = 10.0;
+    double U_weight = 15;
+    double delay_weight = 2.5;
+    double loss_weight = 10;
+    double mddl_weight = 10.0;
 
-    // double reward = U_weight * U 
-    //               - delay_weight * p_delay 
-    //               - loss_weight * p_loss 
-    //               - mddl_weight * p_mddl;
+    double reward = U_weight * U 
+                  - delay_weight * p_delay 
+                  - loss_weight * p_loss 
+                  - mddl_weight * p_mddl;
 
     // (5) 过载惩罚：scaled_bw 超过 trace_bw 的部分直接扣分（避免拥塞导致高丢包/跳帧）
     // double p_over = 0.0;
@@ -198,31 +198,31 @@ double RLStateManager::CalculateReward(double real_throughput_bps, double trace_
     //     p_over = std::min(p_over, 1.0);
     // }
 
-    // 权重随 Rt 调整（随后做归一化）
-    double U_weight = 5.0 * std::log(1.0 + static_cast<double>(Rt_used)) + 2.0;
-    double delay_weight = 2.5;
-    double loss_weight = 10.0 / (1.0 + 0.5 * static_cast<double>(Rt_used));
-    double mddl_weight = 8.0 * std::log(1.0 + static_cast<double>(Rt_used)) + 2.0;
+    // // 权重随 Rt 调整（随后做归一化）
+    // double U_weight = 5.0 * std::log(1.0 + static_cast<double>(Rt_used)) + 2.0;
+    // double delay_weight = 2.5;
+    // double loss_weight = 10.0 / (1.0 + 0.5 * static_cast<double>(Rt_used));
+    // double mddl_weight = 8.0 * std::log(1.0 + static_cast<double>(Rt_used)) + 2.0;
 
-    std::cout << "U_weight: " << U_weight << std::endl;
-    std::cout << "delay_weight: " << delay_weight << std::endl;
-    std::cout << "loss_weight: " << loss_weight << std::endl;
-    std::cout << "mddl_weight: " << mddl_weight << std::endl;
-    // Rt 越小越怕过载
-    // double over_weight = 10.0 / (1.0 + static_cast<double>(Rt_used));
+    // std::cout << "U_weight: " << U_weight << std::endl;
+    // std::cout << "delay_weight: " << delay_weight << std::endl;
+    // std::cout << "loss_weight: " << loss_weight << std::endl;
+    // std::cout << "mddl_weight: " << mddl_weight << std::endl;
+    // // Rt 越小越怕过载
+    // // double over_weight = 10.0 / (1.0 + static_cast<double>(Rt_used));
 
-    // // 归一化
-    double total_weight = U_weight + delay_weight + loss_weight + mddl_weight; // + over_weight;
-    U_weight /= total_weight;
-    delay_weight /= total_weight;
-    loss_weight /= total_weight;
-    mddl_weight /= total_weight;
-    // over_weight /= total_weight;
+    // // // 归一化
+    // double total_weight = U_weight + delay_weight + loss_weight + mddl_weight; // + over_weight;
+    // U_weight /= total_weight;
+    // delay_weight /= total_weight;
+    // loss_weight /= total_weight;
+    // mddl_weight /= total_weight;
+    // // over_weight /= total_weight;
 
-    double reward = U_weight * U 
-                  - delay_weight * p_delay 
-                  - loss_weight * p_loss 
-                  - mddl_weight * p_mddl;
+    // double reward = U_weight * U 
+    //               - delay_weight * p_delay 
+    //               - loss_weight * p_loss 
+    //               - mddl_weight * p_mddl;
                 //   - over_weight * p_over;
 
     // double U_weight = 10 * (1 + Rt_used);
@@ -363,7 +363,7 @@ void RLStateManager::FinalizeCurrentRtGroup() {
         double new_p_loss = actual_loss;
 
         double n = static_cast<double>(current_rt_group_.packet_count);
-        std::cout << "当前frame_id: " << current_rt_group_.frame_id << "当前Rt: " << current_rt_group_.Rt_value << "当前包数: " << n << std::endl;
+        std::cout << "<RLStateManager> 当前frame_id: " << current_rt_group_.frame_id << "当前Rt: " << current_rt_group_.Rt_value << "当前包数: " << n << "当前mu: " << current_rt_group_.mu_used << std::endl;
         double avg_U = current_rt_group_.sum_U / n;
         double avg_p_delay = current_rt_group_.sum_p_delay / n;
         double avg_p_mddl = current_rt_group_.sum_p_mddl / n;
@@ -373,10 +373,10 @@ void RLStateManager::FinalizeCurrentRtGroup() {
         std::cout << "avg_p_delay: " << avg_p_delay << std::endl;
         std::cout << "avg_p_mddl: " << avg_p_mddl << std::endl;
 
-        double U_weight = 5 * std::log(1 + current_rt_group_.Rt_value) + 2;
+        double U_weight = 15;
         double delay_weight = 2.5;
-        double loss_weight = 10.0 / (1 + 0.5 * current_rt_group_.Rt_value);
-        double mddl_weight = 8 * std::log(1 + current_rt_group_.Rt_value) + 2;
+        double loss_weight = 10;
+        double mddl_weight = 10;
 
         std::cout << "U_weight: " << U_weight << std::endl;
         std::cout << "delay_weight: " << delay_weight << std::endl;
@@ -390,12 +390,12 @@ void RLStateManager::FinalizeCurrentRtGroup() {
         loss_weight /= total_weight;
         mddl_weight /= total_weight;
 
-        // current_rt_group_.avg_reward = U_weight * avg_U
-        //                              - delay_weight * avg_p_delay
-        //                              - loss_weight * new_p_loss
-        //                              - mddl_weight * avg_p_mddl;
+        current_rt_group_.avg_reward = U_weight * avg_U
+                                     - delay_weight * avg_p_delay
+                                     - loss_weight * new_p_loss
+                                     - mddl_weight * avg_p_mddl;
 
-        current_rt_group_.avg_reward = current_rt_group_.reward_sum / n;
+        // current_rt_group_.avg_reward = current_rt_group_.reward_sum / n;
 
         // 基于Rt的动态权重
         // double temp_U_weight = 10 * (1 + Rt_used);
@@ -414,7 +414,7 @@ void RLStateManager::FinalizeCurrentRtGroup() {
         //                              - final_loss_weight * new_p_loss
         //                              - final_mddl_weight * avg_p_mddl;
 
-        current_rt_group_.loss_rate = actual_loss;
+        current_rt_group_.loss_rate = actual_loss; //该组的实际丢包率
 
         RtGroupRewardRecord record(
             current_rt_group_.frame_id,
@@ -461,12 +461,15 @@ void RLStateManager::FinalizeCurrentRtGroup() {
                        << ", reward=" << current_rt_group_.avg_reward
                        << ", " << mu_learner_->GetStatusString());
                        
-            std::cout << "[MuLearner] Rt group update: frame=" << current_rt_group_.frame_id
-                      << ", Rt=" << current_rt_group_.Rt_value
-                      << ", loss=" << current_rt_group_.loss_rate
-                      << ", mu_used=" << current_rt_group_.mu_used
-                      << ", avg_reward=" << current_rt_group_.avg_reward
-                      << ", " << mu_learner_->GetStatusString() << std::endl;
+            std::cout << "[RL-STEP] frame=" << current_rt_group_.frame_id
+                      << " | pkts=" << current_rt_group_.packet_count
+                      << " | state=(Rt=" << current_rt_group_.Rt_value 
+                      << ", loss=" << current_rt_group_.loss_rate << ")"
+                      << " | action=(mu=" << current_rt_group_.mu_used << ")"
+                      << " | reward=" << current_rt_group_.avg_reward
+                      << " | baseline=" << mu_learner_->GetBaseline()
+                      << " | advantage=" << (current_rt_group_.avg_reward - mu_learner_->GetBaseline())
+                      << std::endl;
         }
     }
     

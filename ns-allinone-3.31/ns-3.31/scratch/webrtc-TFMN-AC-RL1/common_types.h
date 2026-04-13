@@ -42,9 +42,11 @@ inline uint8_t DiscretizeLossLevel(double loss_rate) {
 // 修改方式：增删 kMuActions 元素，同步更新 kNumMuActions
 //   Python 端 ns3ai_env.py 中的 MU_ACTIONS 列表必须与此一致
 // ============================================================================
-constexpr double kMuActions[] = {0.95, 0.975, 1.0, 1.025, 1.05};
+// constexpr double kMuActions[] = {0.95, 0.975, 1.0, 1.025, 1.05};
+// constexpr double kMuActions[] = {1,1,1,1,1};
 // constexpr double kMuActions[] = {0.8, 0.9, 1.0, 1.1, 1.2};
-constexpr size_t kNumMuActions = 5;
+constexpr size_t kNumMuActions = 11; // 0.90,0.91,0.92,0.93,0.94,0.95,0.96,0.97,0.98,0.99,1.00,1.01,1.02,1.03,1.04,1.05
+constexpr double kMuActions[] = {0.95, 0.96, 0.97, 0.98, 0.99, 1.00, 1.01, 1.02, 1.03, 1.04, 1.05};
 
 // ============================================================================
 // 工具函数

@@ -24,8 +24,8 @@ using namespace ns3;
 NS_LOG_COMPONENT_DEFINE("webrtc-static");
 
 int main(int argc, char* argv[]) {
-    // 重定向std::cout到日志文件
-    std::ofstream log_file("webrtc_simulation.log");
+    // 重定向std::cout到日志文件，并附带时间戳
+    std::ofstream log_file("./webrtc_simulation_logs/webrtc_simulation_" + std::to_string(time(NULL)) + ".log");
     std::streambuf* cout_buffer = std::cout.rdbuf();
     std::cout.rdbuf(log_file.rdbuf());
     

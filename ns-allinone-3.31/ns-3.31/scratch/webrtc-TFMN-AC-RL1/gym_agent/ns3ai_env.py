@@ -14,7 +14,9 @@ except ImportError:
 
 # 离散 mu 动作表（必须与 C++ common_types.h 中 kMuActions 一致）
 # MU_ACTIONS = [0.8, 0.9, 1.0, 1.1, 1.2]
-MU_ACTIONS = [0.95,0.975,1.0,1.025,1.05]
+# MU_ACTIONS = [1,1,1,1,1]
+# MU_ACTIONS = [0.95, 0.975, 1.0, 1.025, 1.05]
+MU_ACTIONS = [0.95, 0.96, 0.97, 0.98, 0.99, 1.00, 1.01, 1.02, 1.03, 1.04, 1.05]
 
 # ShmEnv / ShmAction must match C++ (common_types.h) and ns3-ai layout
 class ShmEnv(Structure):

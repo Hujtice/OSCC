@@ -87,10 +87,14 @@ void QoEIntegrationManager::OnPacketReceived(const FramePacketInfo& info, const 
 
             NS_LOG_DEBUG("MuLearner: Applied mu=" << mu << " for Rt=" << Rt << ", loss=" << observed_loss);
         }
+        std::cout << "<QoEManager> 当前frame_id: " << info.frame_id << " 当前Rt: " << Rt << " 当前observed_loss: " << observed_loss << " 当前mu: " << mu << std::endl;
         current_group_frame_id_ = info.frame_id;
         current_group_Rt_ = Rt;
         has_active_group_ = true;
     }
+    // 打印包的帧id，包id，发送时间，接收时间
+    std::cout << "包的帧id: " << info.frame_id << " 包seq: " << info.seq << " Rt: " << Rt << " 发送时间: " << info.send_time_ms << " 接收时间: " << now.GetMilliSeconds() << std::endl;
+        
 
     // 计算奖励：gcc_bw 做分子、real_trace_bw 做分母（P3）
     // 注意：为了在 RL_log.csv 中能清晰区分同一帧内的各个包，这里将 packet_index 定义为“帧内包序号”（从 0 开始）

@@ -43,8 +43,8 @@ except ImportError as e:
 from ns3ai_env import Ns3AiGymEnv, MU_ACTIONS
 
 # Reward weights (must match C++ rl_state_manager.cc)
-_W_U = 2.5
-_W_DELAY = 10.0
+_W_U = 10.0
+_W_DELAY = 2.5
 _W_LOSS = 10.0
 _W_MDDL = 10.0
 
