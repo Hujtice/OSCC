@@ -86,10 +86,19 @@ MuAction AiMuLearner::Act(const MuState& state) {
         return MuAction(1.0);
     }
 
+    // 查掩码表
+    bool hit = false;
+    double forced_mu = 1.0;
+    if (mask_table_) {
+        hit = mask_table_->Lookup(static_cast<uint32_t>(state.rt), state.loss, forced_mu);
+    }
+
     // 1. Write observation (and previous reward/done) to shared memory
     //    EnvSetterCond() waits for version % 2 == 0 (our turn)
     ShmEnv* env = rl_->EnvSetterCond();
     WriteStateToEnv(env, state);
+    env->mask_hit = hit ? 1 : 0;
+    env->forced_mu = static_cast<float>(forced_mu);
     rl_->SetCompleted();  // version: even -> odd (Python's turn)
 
     // 2. Wait for Python to read env and write action
@@ -100,13 +109,18 @@ MuAction AiMuLearner::Act(const MuState& state) {
         return MuAction(1.0);
     }
 
-    double mu = std::max(config_.mu_min, std::min(config_.mu_max, static_cast<double>(act->mu)));
+    double mu;
+    if (hit) {
+        mu = forced_mu;
+    } else {
+        mu = std::max(config_.mu_min, std::min(config_.mu_max, static_cast<double>(act->mu)));
+    }
     rl_->GetCompleted();
 
     last_mu_ = mu;
     step_count_++;
     NS_LOG_INFO("Step " << step_count_ << ": State(Rt=" << state.rt << ", loss=" << state.loss
-                        << ") -> Action(mu=" << mu << ")");
+                        << ") -> " << (hit ? "[TABLE]" : "[RL]") << " Action(mu=" << mu << ")");
     return MuAction(mu);
 }
 

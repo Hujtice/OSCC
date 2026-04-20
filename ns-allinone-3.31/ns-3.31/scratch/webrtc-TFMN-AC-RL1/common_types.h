@@ -4,6 +4,9 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <map>
+#include <fstream>
+#include <sstream>
 #include <cmath>
 #include <sys/time.h>
 #include "ns3/core-module.h"
@@ -212,6 +215,8 @@ struct ShmEnv {
     float trace_bw_bps;         // Trace 链路带宽 (bps)
     uint32_t frame_id;          // 当前 Rt 组对应的 frame_id
     uint8_t done;               // 是否结束 (0/1)
+    uint8_t mask_hit;           // 是否命中掩码表 (0=未命中/RL, 1=命中/表)
+    float forced_mu;            // 命中掩码表时的强制 mu 值
 } __attribute__((packed));
 
 struct ShmAction {
@@ -239,6 +244,53 @@ struct RLState {
                 p_delay(0.0), p_loss(0.0), p_mddl(0.0),
                 current_delay(0.0), current_loss_rate(0.0), 
                 miss_deadline_time(0.0), transmission_opportunities(0) {}
+};
+
+// ============================================================================
+// 掩码表：(Rt, loss_level) → mu
+// 命中表的 Rt 组使用表中预设 mu，未命中的交给 RL 决策
+// CSV 格式：Rt,loss_level,mu（首行为 header）
+// ============================================================================
+class MuMaskTable {
+public:
+    using Key = std::pair<uint32_t, uint8_t>;
+
+    bool Load(const std::string& filepath) {
+        std::ifstream f(filepath);
+        if (!f.is_open()) return false;
+        std::string line;
+        std::getline(f, line); // skip header
+        while (std::getline(f, line)) {
+            if (line.empty() || line[0] == '#') continue;
+            std::istringstream ss(line);
+            std::string tok;
+            uint32_t rt; uint8_t ll; double mu;
+            if (!std::getline(ss, tok, ',')) continue;
+            rt = static_cast<uint32_t>(std::stoul(tok));
+            if (!std::getline(ss, tok, ',')) continue;
+            ll = static_cast<uint8_t>(std::stoul(tok));
+            if (!std::getline(ss, tok, ',')) continue;
+            mu = std::stod(tok);
+            table_[{rt, ll}] = mu;
+        }
+        return !table_.empty();
+    }
+
+    bool Lookup(uint32_t Rt, double loss_rate, double& out_mu) const {
+        uint8_t ll = DiscretizeLossLevel(loss_rate);
+        auto it = table_.find({Rt, ll});
+        if (it != table_.end()) {
+            out_mu = it->second;
+            return true;
+        }
+        return false;
+    }
+
+    size_t Size() const { return table_.size(); }
+    bool Empty() const { return table_.empty(); }
+
+private:
+    std::map<Key, double> table_;
 };
 
 } // namespace oscc

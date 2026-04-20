@@ -321,7 +321,7 @@ def plt_with_linear_fitting(file_path):
 
 if __name__ == '__main__':
     # file_paths = [f for f in os.listdir('./webrtc_simulation_logs') if f.endswith('_1775148251.log')]
-    file_paths = [f for f in os.listdir('./webrtc_simulation_logs') if f.endswith('.log')]
+    file_paths = [f for f in os.listdir('./webrtc_simulation_logs') if f.endswith('.log') and (f.startswith('webrtc_simulation_'))]
     for file_path in file_paths:
             print(f"正在处理文件: {file_path}")
             # extract_and_count(f'./webrtc_simulation_logs/{file_path}')

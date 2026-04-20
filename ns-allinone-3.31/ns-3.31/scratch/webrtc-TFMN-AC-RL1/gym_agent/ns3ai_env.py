@@ -36,6 +36,8 @@ class ShmEnv(Structure):
         ("trace_bw_bps", c_float),
         ("frame_id", c_uint32),
         ("done", c_uint8),
+        ("mask_hit", c_uint8),     # 1=命中掩码表, 0=未命中
+        ("forced_mu", c_float),    # 命中时 C++ 指定的 mu 值
     ]
 
 
@@ -53,9 +55,10 @@ class Ns3AiGymEnv(gym.Env):
     """
     metadata = {"render_modes": []}
 
-    def __init__(self, shm_id=1234, py_interface_module=None, **kwargs):
+    def __init__(self, shm_id=1234, py_interface_module=None, mask_train=False, **kwargs):
         super().__init__(**kwargs)
         self._shm_id = shm_id
+        self._mask_train = mask_train
         if py_interface_module is None:
             import py_interface as p
             self._py = p
@@ -72,6 +75,7 @@ class Ns3AiGymEnv(gym.Env):
             "reward_raw_loss_rate": 0.0, "reward_raw_miss_deadline_s": 0.0,
             "reward_gcc_bw_bps": 0.0, "reward_trace_bw_bps": 0.0,
             "core_frame_id": 0,
+            "mask_hit": False, "forced_mu": 1.0,
         }
         self._first_reset = True
         self.observation_space = spaces.Box(
@@ -104,6 +108,12 @@ class Ns3AiGymEnv(gym.Env):
         action (the one sent in the prior step() or reset()). This is inherent
         to the shared-memory protocol: C++ observes the effect of the last mu,
         calculates the reward, and writes it together with the next observation.
+
+        Mask table handling:
+        - If C++ sets mask_hit=1, the forced_mu from the table is used regardless
+          of the RL action. The RL action is still computed but ignored by C++.
+        - If mask_train is False (default), reward is zeroed for mask-hit steps
+          so that PPO does not update its policy from table-driven transitions.
         """
         mu = MU_ACTIONS[int(action)]
         with self._rl as data:
@@ -112,6 +122,8 @@ class Ns3AiGymEnv(gym.Env):
             obs = np.array([data.env.norm_rt, data.env.norm_loss], dtype=np.float32)
             reward = float(data.env.reward)
             done = bool(data.env.done)
+            mask_hit = bool(data.env.mask_hit)
+            forced_mu = float(data.env.forced_mu)
             info = {
                 "reward_U": float(data.env.U),
                 "reward_p_delay": float(data.env.p_delay),
@@ -123,8 +135,17 @@ class Ns3AiGymEnv(gym.Env):
                 "reward_gcc_bw_bps": float(data.env.gcc_bw_bps),
                 "reward_trace_bw_bps": float(data.env.trace_bw_bps),
                 "core_frame_id": int(data.env.frame_id),
+                "mask_hit": mask_hit,
+                "forced_mu": forced_mu,
             }
-            data.act.mu = mu
+            if mask_hit:
+                data.act.mu = forced_mu
+            else:
+                data.act.mu = mu
+
+        if mask_hit and not self._mask_train:
+            reward = 0.0
+
         self._last_obs = obs
         self._last_reward = reward
         self._last_done = done

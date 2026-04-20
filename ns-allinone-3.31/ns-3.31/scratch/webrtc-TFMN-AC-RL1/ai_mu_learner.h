@@ -4,6 +4,7 @@
 #include "common_types.h"
 #include "mu_learner.h"
 #include <memory>
+#include <string>
 
 // AiMuLearner: bridge between ns-3 and Python RL agent via ns3-ai (shared memory).
 // Requires ns3-ai module. Python side uses py_interface.Ns3AIRL with same ShmEnv/ShmAction.
@@ -36,6 +37,10 @@ public:
 
     const MuLearnerConfig& GetConfig() const { return config_; }
     uint16_t GetShmId() const { return shm_id_; }
+
+    void SetMaskTable(std::shared_ptr<MuMaskTable> table) { mask_table_ = table; }
+    bool HasMaskTable() const { return mask_table_ && !mask_table_->Empty(); }
+
     /** Call before process exit (e.g. before _exit(0)) so Python can release shared memory. */
     void NotifySimulationEnd();
 
@@ -58,6 +63,8 @@ private:
     double last_gcc_bw_bps_;
     double last_trace_bw_bps_;
     uint32_t last_frame_id_;
+
+    std::shared_ptr<MuMaskTable> mask_table_;
 
     void WriteStateToEnv(ShmEnv* env, const MuState& state);
 };

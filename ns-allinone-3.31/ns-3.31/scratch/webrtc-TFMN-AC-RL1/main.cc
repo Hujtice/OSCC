@@ -50,6 +50,7 @@ int main(int argc, char* argv[]) {
     std::string fps_str("30");
     std::string frame_trace_output("");
     std::string skip_frame_str("false");
+    std::string mask_table_path("");
     
     // 解析命令行参数
     CommandLine cmd;
@@ -64,6 +65,7 @@ int main(int argc, char* argv[]) {
     cmd.AddValue("frame_trace", "frame trace output file path", frame_trace_output);
     cmd.AddValue("fps", "frame rate", fps_str);
     cmd.AddValue("skip", "enable skip frame logic", skip_frame_str);
+    cmd.AddValue("mask_table", "Path to (Rt,loss_level,mu) mask table CSV", mask_table_path);
     
     cmd.Parse(argc, argv);
     
@@ -125,10 +127,11 @@ int main(int argc, char* argv[]) {
     std::cout << "FPS: " << fps << std::endl;
     std::cout << "Skip frame: " << (skip_frame_enabled ? "ENABLED" : "DISABLED") << std::endl;
     std::cout << "Frame trace output: " << frame_trace_output << std::endl;
+    std::cout << "Mask table: " << (mask_table_path.empty() ? "NONE" : mask_table_path) << std::endl;
     
     // 运行仿真
     run_single_trace_simulation(trace_file, instance, controller_type, 1, mb, ls, folder, mu,
-                               fps, frame_trace_output, skip_frame_enabled);
+                               fps, frame_trace_output, skip_frame_enabled, mask_table_path);
     
     std::cout << "=== WebRTC TraceAll-Frame with Real Frame Analysis Completed Successfully ===" << std::endl;
     

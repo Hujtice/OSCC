@@ -67,6 +67,8 @@ _CSV_HEADER = [
     # reward weighted (5, computed in Python)
     "reward_weighted_U", "reward_weighted_delay",
     "reward_weighted_loss", "reward_weighted_mddl", "reward_total",
+    # mask table (2)
+    "mask_hit", "mask_forced_mu",
 ]
 
 
@@ -157,6 +159,10 @@ class StepLoggerCallback(BaseCallback):
         w_mddl = -_W_MDDL * r_pm
         w_total = w_U + w_delay + w_loss + w_mddl
 
+        # mask table info
+        m_hit = int(info.get("mask_hit", False))
+        m_forced = info.get("forced_mu", 1.0)
+
         self._writer.writerow([
             self.num_timesteps, frame_id,
             f"{raw_rt:.2f}", f"{raw_loss:.1f}", f"{norm_rt:.6f}", f"{norm_loss:.6f}",
@@ -168,6 +174,7 @@ class StepLoggerCallback(BaseCallback):
             f"{r_U:.6f}", f"{r_pd:.6f}", f"{r_pl:.6f}", f"{r_pm:.6f}",
             f"{w_U:.6f}", f"{w_delay:.6f}", f"{w_loss:.6f}", f"{w_mddl:.6f}",
             f"{w_total:.6f}",
+            m_hit, f"{m_forced:.4f}",
         ])
         if self.num_timesteps % 100 == 0:
             self._file.flush()
@@ -197,9 +204,9 @@ SHM_POOL_SIZE = 4096
 DEFAULT_SHM_ID = 1234
 
 
-def create_env(shm_id=DEFAULT_SHM_ID):
+def create_env(shm_id=DEFAULT_SHM_ID, mask_train=False):
     """Create ns3-ai Gym environment. Call after py_interface.Init()."""
-    return Ns3AiGymEnv(shm_id=shm_id)
+    return Ns3AiGymEnv(shm_id=shm_id, mask_train=mask_train)
 
 
 def main():
@@ -211,6 +218,9 @@ def main():
     parser.add_argument("--model-dir", type=str, default="./models")
     parser.add_argument("--log-dir", type=str, default="./logs")
     parser.add_argument("--load-model", type=str, default=None)
+    parser.add_argument("--mask-train", action="store_true", default=False,
+                        help="If set, mask-table-hit samples also participate in RL training; "
+                             "otherwise their reward is zeroed (default: skip)")
     args = parser.parse_args()
 
     if args.algorithm in ("SAC", "TD3"):
@@ -227,11 +237,12 @@ def main():
     print(f"Timesteps:        {args.timesteps}")
     print(f"shm_id:           {args.shm_id}")
     print(f"Model dir:       {args.model_dir}")
+    print(f"Mask train:       {args.mask_train}")
     print("=" * 60)
 
     print("\n[1/4] Initializing shared memory and creating env...")
     py_interface.Init(SHM_KEY, SHM_POOL_SIZE)
-    env = create_env(shm_id=args.shm_id)
+    env = create_env(shm_id=args.shm_id, mask_train=args.mask_train)
     env = Monitor(env, args.log_dir)
     print(f"  Observation space: {env.observation_space}")
     print(f"  Action space:      {env.action_space}")

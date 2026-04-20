@@ -37,6 +37,7 @@ python3 train.py --algorithm PPO --timesteps 100000
 - `--model-dir`: 模型保存目录，默认 ./models
 - `--log-dir`: TensorBoard 日志目录，默认 ./logs
 - `--load-model`: 从检查点继续训练
+- `--mask-train`: 掩码表命中的样本也参与 RL 训练（默认不加 = 命中时 reward 归零不训练）
 
 ### 示例
 
@@ -52,6 +53,7 @@ python3 train.py --load-model ./models/PPO_webrtc_mu_xxx_final.zip
 - **Reward**: C++ 在上一 **Rt 组**结束时写入 ShmEnv；组级 QoE（reward 中丢包项用该组 **seq 累计实际丢包率** 重算，与逐包日志可能不一致）
 - **步频说明**: ns-3 仅在每个 **新 (frame_id, Rt) 组** 调用一次 `Act()`，因此 SB3 的 `timesteps` 更接近「Rt 组数」而非「应用层包数」
 - **离散化配置**: Loss 等级阈值和 μ 动作表均可调，详见 [../project_map.md](../project_map.md) 中「状态/动作空间离散化配置」章节
+- **掩码表**: C++ 端可通过 `--mask_table=<csv>` 指定规则表；命中表的 Rt 组使用预设 mu（info 字典含 `mask_hit` 和 `forced_mu`）。Python 端 `--mask-train` 控制命中样本是否参与训练。详见 [../project_map.md](../project_map.md) 中「掩码表 (Mask Table)」章节
 
 ## 监控
 

@@ -5,7 +5,7 @@ NS3_DIR="$HOME/OSCC/ns-allinone-3.31/ns-3.31"
 GYM_DIR="${NS3_DIR}/scratch/webrtc-TFMN-AC-RL1/gym_agent"
 MODELS_DIR="${GYM_DIR}/models"
 
-TOTAL_RUNS=30
+TOTAL_RUNS=698
 SLEEP_BEFORE_PYTHON=8   # 等待 ns-3 启动的秒数，根据实际情况调整
 CHECK_INTERVAL=5        # 进程状态检测间隔（秒）
 # ====================================
@@ -52,7 +52,7 @@ for i in $(seq 1 ${TOTAL_RUNS}); do
     echo "[INFO] 启动 ns-3 仿真..."
     cd "${NS3_DIR}"
     ./waf --run "scratch/webrtc-TFMN-AC-RL1/webrtc-TFMN-AC-RL1 \
-        --trace=traces/traces/AItrans/AItrans_5.log \
+        --trace=traces/traces/AItrans/AItrans_2.log \
         --skip=true --mu=1.0 --ls=0.01 \
         --folder=trace_results/ai_training --it=ai_test" &
     NS3_PID=$!

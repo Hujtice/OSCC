@@ -94,7 +94,8 @@ void test_app_on_p2p(
     uint32_t fps = 30,
     const std::string& frame_trace_output = "",
     bool skip_frame_enabled = false,
-    const std::string& base_output_folder = "trace_results");
+    const std::string& base_output_folder = "trace_results",
+    const std::string& mask_table_path = "");
 
 // 运行单个trace仿真
 void run_single_trace_simulation(
@@ -108,7 +109,8 @@ void run_single_trace_simulation(
     double bandwidth_scale_factor = 1.0, 
     uint32_t fps = 30,
     const std::string& frame_trace_output = "",
-    bool skip_frame_enabled = false);
+    bool skip_frame_enabled = false,
+    const std::string& mask_table_path = "");
 
 } // namespace oscc
 

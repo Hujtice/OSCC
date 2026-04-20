@@ -57,6 +57,39 @@
 
 **注意**：当前仅 PPO 支持离散动作（`Discrete`），SAC/TD3 不兼容。
 
+### 掩码表 (Mask Table) — 规则优先 + RL 兜底
+
+支持通过 CSV 文件定义 `(Rt, loss_level) → mu` 规则表：命中表的 Rt 组使用预设 mu，未命中的交给 RL 决策。
+
+**CSV 格式**（首行 header，`#` 开头为注释）：
+
+```
+Rt,loss_level,mu
+0,0,1.05
+0,1,1.00
+1,0,1.04
+3,4,0.95
+```
+
+其中 `loss_level` 为 0-4 的整数（L0-L4），`mu` 为对应的带宽缩放因子。
+
+**使用方式**：
+
+| 场景 | C++ 命令行 | Python 命令行 | 行为 |
+|------|-----------|--------------|------|
+| 不使用掩码表（默认） | 不加 `--mask_table` | 不加 `--mask-train` | 全部走 RL，完全向后兼容 |
+| 掩码表优先，命中不训练 | `--mask_table=mask_table.csv` | 不加 `--mask-train` | 命中表的组用表中 mu，reward 归零不影响策略 |
+| 掩码表优先，命中也训练 | `--mask_table=mask_table.csv` | `--mask-train` | 命中表的组用表中 mu，reward 正常传入策略更新 |
+
+**实现原理**：
+
+- C++ `AiMuLearner::Act()` 在写共享内存前查表；命中则在 `ShmEnv` 中标记 `mask_hit=1` + `forced_mu`
+- **始终走完整的共享内存交互**（不跳过），保持 reward-action 配对不错位
+- Python `Ns3AiGymEnv.step()` 读取 `mask_hit`：命中时回写 `forced_mu`（忽略 RL 动作）；如果 `--mask-train` 未设置则 reward 归零
+- 日志 CSV 中 `mask_hit` / `mask_forced_mu` 列记录每步的掩码状态
+
+**涉及文件**：`common_types.h`（MuMaskTable 类 + ShmEnv 新字段）、`ai_mu_learner.h/cc`（查表逻辑）、`main.cc`（`--mask_table` 参数）、`simulation.cc`（加载与注入）、`ns3ai_env.py`（ShmEnv 对齐 + step 处理）、`train.py`（`--mask-train` 参数）
+
 ## 文件结构与职责
 
 ```
@@ -142,8 +175,12 @@ struct RtGroupRewardRecord { frame_id, Rt_value, loss_rate, mu_used, avg_reward,
 struct RLState { mu, reward, bandwidth_utilization, p_delay, p_loss, p_mddl, ... };
 
 // ns3-ai 共享内存结构（与 Python ctypes 对齐，详见 common_types.h）
-// ShmEnv 含 norm_rt, norm_loss, reward, U, p_delay, p_loss, p_mddl, raw_*, gcc/trace_bw, frame_id, done 等
+// ShmEnv 含 norm_rt, norm_loss, reward, U, p_delay, p_loss, p_mddl, raw_*, gcc/trace_bw, frame_id, done,
+//         mask_hit (uint8, 掩码表命中标记), forced_mu (float, 命中时强制 mu)
 struct ShmAction { float mu; };  // Python 写入 MU_ACTIONS[action_index]（离散值 0.8/0.9/1.0/1.1/1.2）
+
+// 掩码表 (Rt, loss_level) → mu
+class MuMaskTable { Load(csv); Lookup(Rt, loss_rate) → (hit, mu); };
 ```
 
 ## 核心模块详解
@@ -167,12 +204,13 @@ class IMuLearner {
 **依赖**: ns-3 模块 `ns3-ai`（src/ns3-ai），使用 `Ns3AIRL<ShmEnv, ShmAction, RLEmptyInfo>` 与 Python 通过共享内存通信。
 
 **关键方法**:
-- `Act(MuState)`: 将 state 写入 ShmEnv（norm_rt, norm_loss, 上步 reward/done），`SetCompleted()` 后 `ActionGetter()` 阻塞等待 Python 写入 ShmAction.mu，clip 到 [mu_min, mu_max] 返回
+- `Act(MuState)`: 查掩码表 → 写 ShmEnv（norm_rt, norm_loss, 上步 reward/done, mask_hit, forced_mu）→ `SetCompleted()` → `ActionGetter()` 阻塞等待 Python → 命中表用 forced_mu，否则用 Python 返回的 mu（clip 到 [mu_min, mu_max]）
+- `SetMaskTable(shared_ptr<MuMaskTable>)`: 注入掩码表，不设置则全部走 RL
 - `Observe(MuExperience)`: 更新 last_reward_/last_done_，下次 Act 时写入 ShmEnv
 - `NotifySimulationEnd()`: 调用 `rl_->SetFinish()`，供仿真结束前显式调用（避免 _exit 导致 Python 端无法感知结束）
 
 **共享内存规格**（与 Python ns3ai_env.py 中 ctypes 一致）:
-- ShmEnv: norm_rt (float, Rt/rt_max), norm_loss (float, loss_level/4, 离散 5 值 0.0~1.0), reward (float), done (uint8)
+- ShmEnv: norm_rt (float, Rt/rt_max), norm_loss (float, loss_level/4, 离散 5 值 0.0~1.0), reward (float), done (uint8), **mask_hit (uint8)**, **forced_mu (float)**
 - ShmAction: mu (float) ∈ {0.8, 0.9, 1.0, 1.1, 1.2}（Python 从 Discrete(5) 映射）
 - 默认 shm_id=1234（单流）；多流时 1234+i
 
@@ -305,6 +343,7 @@ Trace File ──→ BandwidthChanger ──→ P2P Link (带宽切换)         
 | `--it=<name>` | 实例名称 | default_instance |
 | `--m=<mode>` | 仿真模式 (simu/emu) | simu |
 | `--frame_trace=<file>` | 帧trace输出路径 | 自动生成 |
+| `--mask_table=<file>` | 掩码表 CSV 路径（(Rt,loss_level,mu)） | 空（不使用） |
 
 ### Python 训练 (gym_agent/train.py)
 
@@ -316,6 +355,7 @@ Trace File ──→ BandwidthChanger ──→ P2P Link (带宽切换)         
 | `--model-dir` | 模型保存目录 | ./models |
 | `--log-dir` | TensorBoard 日志目录 | ./logs |
 | `--load-model` | 加载已有模型继续训练 | None |
+| `--mask-train` | 掩码表命中的样本也参与 RL 训练 | False（命中时 reward 归零） |
 
 ## 输出文件
 
@@ -370,7 +410,8 @@ cd /home/hjt/OSCC/ns-allinone-3.31/ns-3.31
 nohup ./waf --run "scratch/webrtc-TFMN-AC-RL1/webrtc-TFMN-AC-RL1 \
   --trace=traces/traces/AItrans/AItrans_5.log \
   --skip=true --mu=1.0 --ls=0.01 \
-  --folder=trace_results/ai_training --it=ai_test" \
+  --folder=trace_results/ai_training --it=ai_test \
+  --mask_table=scratch/webrtc-TFMN-AC-RL1/mask_table.csv" \ #启用
   > ns3输出 2>&1 &
 
 nohup ./waf --run "scratch/webrtc-TFMN-AC-RL1/webrtc-TFMN-AC-RL1 \
@@ -393,6 +434,21 @@ nohup python3.12 train.py --algorithm PPO --timesteps 5000000 > train_output.log
 
 # 断点接训
 nohup python3.12 train.py --algorithm PPO --timesteps 8000000 --load-model ./models/PPO_webrtc_mu_20260310_174735_final.zip > train_output2.log 2>&1 &
+
+# === 使用掩码表 ===
+# C++ 侧加 --mask_table 指定规则表 CSV
+nohup ./waf --run "scratch/webrtc-TFMN-AC-RL1/webrtc-TFMN-AC-RL1 \
+  --trace=traces/traces/AItrans/AItrans_5.log \
+  --skip=true --mu=1.0 --ls=0.01 \
+  --mask_table=scratch/webrtc-TFMN-AC-RL1/mask_table.csv \
+  --folder=trace_results/ai_training --it=ai_test" \
+  > ns3输出 2>&1 &
+
+# Python 侧默认命中表的组不参与训练
+nohup python3.12 train.py --algorithm PPO --timesteps 5000000 > train_output.log 2>&1 &
+
+# 若希望命中表的组也参与训练，加 --mask-train
+nohup python3.12 train.py --algorithm PPO --timesteps 5000000 --mask-train > train_output.log 2>&1 &
 ```
 
 ```bash
@@ -442,3 +498,15 @@ ln -s /mnt/nasDisk_ds3617/OSCC_project_backups/webrtc-TFMN/models ./models
 2. **simulation.cc:148-153** — `qoe_manager->GetOSCCController()` 调用了 QoEIntegrationManager 未定义的方法，为旧代码残留
 3. **main.cc:20-22** — `std::cout` 被重定向到 `webrtc_simulation.log` 文件，所有 cout 输出不会显示在终端
 4. **simulation.cc** — 仿真结束前已对 AiMuLearner 调用 `NotifySimulationEnd()`，再 `_exit(0)`，以便 Python 端能检测结束并释放共享内存
+
+
+###cache区
+./waf --run "scratch/webrtc-TFMN-AC-RL1/webrtc-TFMN-AC-RL1 \
+  --trace=traces/traces/AItrans/AItrans_2.log \
+  --skip=true --mu=1.0 --ls=0.01 \
+  --folder=trace_results/ai_training --it=ai_test \
+  --mask_table=scratch/webrtc-TFMN-AC-RL1/mask_table.csv"
+
+python3.12 train.py --algorithm PPO --timesteps 5000000
+python3.12 train.py --algorithm PPO --timesteps 8000000 --load-model ./models/PPO_webrtc_mu_20260410_120455_final.zip
+###

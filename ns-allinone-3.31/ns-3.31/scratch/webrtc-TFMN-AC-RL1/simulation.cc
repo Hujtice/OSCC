@@ -219,7 +219,8 @@ void test_app_on_p2p(const std::string& instance, TimeConollerType controller_ty
                      const std::string& trace_filename, double bandwidth_scale_factor,
                      double loss_rate, uint32_t fps,
                      const std::string& frame_trace_output, bool skip_frame_enabled,
-                     const std::string& base_output_folder) {
+                     const std::string& base_output_folder,
+                     const std::string& mask_table_path) {
     std::cout << "\n=== test_app_on_p2p started with Real Video Frame Analysis ===" << std::endl;
     std::cout << "Instance: " << instance << std::endl;
     std::cout << "Normalized application time: " << startapptime << "s to " << endapptime << "s" << std::endl;
@@ -348,6 +349,18 @@ void test_app_on_p2p(const std::string& instance, TimeConollerType controller_ty
         rl_managers.push_back(std::move(rl));
     }
     
+    // 加载掩码表（如果指定）
+    std::shared_ptr<MuMaskTable> mask_table;
+    if (!mask_table_path.empty()) {
+        mask_table = std::make_shared<MuMaskTable>();
+        if (mask_table->Load(mask_table_path)) {
+            std::cout << "=== Mask table loaded: " << mask_table->Size() << " entries from " << mask_table_path << " ===" << std::endl;
+        } else {
+            std::cerr << "WARNING: Failed to load mask table from: " << mask_table_path << std::endl;
+            mask_table.reset();
+        }
+    }
+
     // 初始化 AiMuLearner (ns3-ai shared memory)
     std::cout << "\n=== Initializing AiMuLearners (Python-based via ns3-ai) ===" << std::endl;
     for (int i = 0; i < num; i++) {
@@ -359,10 +372,14 @@ void test_app_on_p2p(const std::string& instance, TimeConollerType controller_ty
         config.baseline_decay = 0.95;
         
         auto learner = std::make_unique<AiMuLearner>(config, AiMuLearner::kDefaultShmId + i);
+        if (mask_table) {
+            learner->SetMaskTable(mask_table);
+        }
         rl_managers[i]->SetMuLearner(learner.get());
         ai_learners.push_back(std::move(learner));
         
-        std::cout << "AiMuLearner " << i << " initialized (shm_id=" << (AiMuLearner::kDefaultShmId + i) << ", awaiting Python)" << std::endl;
+        std::cout << "AiMuLearner " << i << " initialized (shm_id=" << (AiMuLearner::kDefaultShmId + i)
+                  << ", mask_table=" << (mask_table ? "YES" : "NO") << ", awaiting Python)" << std::endl;
     }
     std::cout << "================================\n" << std::endl;
     
@@ -495,7 +512,8 @@ void run_single_trace_simulation(const std::string& trace_file, const std::strin
                                  double loss_rate, const std::string& base_output_folder,
                                  double bandwidth_scale_factor,
                                  uint32_t fps, const std::string& frame_trace_output,
-                                 bool skip_frame_enabled) {
+                                 bool skip_frame_enabled,
+                                 const std::string& mask_table_path) {
     std::cout << "\n==========================================" << std::endl;
     std::cout << "Starting simulation for: " << trace_file << std::endl;
     std::cout << "Instance: " << instance << std::endl;
@@ -580,7 +598,7 @@ void run_single_trace_simulation(const std::string& trace_file, const std::strin
                    max_bandwith, triggerloss.get(), changer.get(), trace_file, 
                    bandwidth_scale_factor, loss_rate,
                    fps, frame_trace_output, skip_frame_enabled,
-                   base_output_folder);
+                   base_output_folder, mask_table_path);
     
     std::cout << "Simulation completed successfully" << std::endl;
     

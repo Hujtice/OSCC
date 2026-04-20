@@ -64,11 +64,27 @@ python3 train.py --algorithm PPO --timesteps 100000
 - [INSTALL.md](INSTALL.md) - 详细安装与故障排除
 - [gym_agent/README.md](gym_agent/README.md) - Python 端说明
 
+## 掩码表（规则优先 + RL 兜底）
+
+可以提供一张 `(Rt, loss_level) → mu` 的 CSV 规则表：命中表的 Rt 组直接使用预设 mu，未命中的交给 RL 决策。
+
+```bash
+# C++ 侧加 --mask_table
+./waf --run "scratch/webrtc-TFMN-AC-RL1/webrtc-TFMN-AC-RL1 \
+  --trace=... --mask_table=mask_table.csv ..."
+
+# Python 侧默认命中不训练；加 --mask-train 则命中也参与训练
+python3 train.py --algorithm PPO --timesteps 100000 --mask-train
+```
+
+详见 [project_map.md](project_map.md) 中「掩码表 (Mask Table)」章节。
+
 ## 特点
 
 - 无 ZMQ/Protobuf，安装更简单  
 - 共享内存低延迟，训练更快  
 - 离散状态/动作空间，PPO 训练（SAC/TD3 保留选项但不兼容离散动作）  
+- 掩码表支持：人工规则优先，未知状态由 RL 探索
 - TensorBoard 可视化，与 Stable-Baselines3 生态兼容  
 
 ## License
